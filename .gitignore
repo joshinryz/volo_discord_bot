@@ -1,0 +1,5 @@
+/.env
+*.mp3
+__pycache__/
+player_map.yml
+player_map.yaml
