@@ -1,23 +1,28 @@
-import discord
-from discord.ext import commands
-from audio_processing import CustomSink, once_done
+"""Bot used to transcribe voice channels in Discord to text."""
 import os
 import logging
 
 # Load environment variables
 from dotenv import load_dotenv
+
+import discord
+
+from discord.ext import commands
+from audio_processing import CustomSink, once_done
+
 load_dotenv()
 
-GUILD_ID = [os.getenv('GUILD_ID')]
-TOKEN = os.getenv('DISCORD_TOKEN')
+GUILD_ID = [os.getenv("GUILD_ID")]
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
 # Bot setup
 intents = discord.Intents.default()
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 bot.connections = {}
+
 
 @bot.slash_command(guild_ids=GUILD_ID)
 async def transcribe(ctx):
@@ -37,6 +42,7 @@ async def transcribe(ctx):
     )
     await ctx.respond("The recording has started!")
 
+
 @bot.slash_command(guild_ids=GUILD_ID)
 async def stop(ctx):
     """
@@ -48,8 +54,10 @@ async def stop(ctx):
         vc.stop_recording()
         del bot.connections[ctx.guild.id]
         await ctx.delete()
+        await ctx.respond("The recording has stopped!")
     else:
         await ctx.respond("Not recording in this guild.")
+
 
 @bot.slash_command(guild_ids=GUILD_ID)
 async def leave(ctx):
@@ -61,8 +69,11 @@ async def leave(ctx):
     else:
         await ctx.respond("Not connected to any voice channel.")
 
+
 @bot.event
 async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
+    """Once we successfully connect with our Bot."""
+    print(f"{bot.user} has connected to Discord!")
+
 
 bot.run(TOKEN)
