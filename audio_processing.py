@@ -2,20 +2,23 @@
 import io
 import time
 import subprocess
+from queue import Queue
 import os
 import asyncio
 from threading import Thread, Lock
 import yaml
+import torch
 
 import discord
 import whisper
 from discord.sinks import *
 
+USE_CUDA = True
+CORRECT_SPELLINGS = "ChatGPT, Foundry, D&D, Lysanthir, Sid, Charles, Prestidigitation, Luna, Spelljammer, Eldritch Blast, Spotify, Luminous Bolt, Swing and a missile, Thaumaturgy"
 TODAY_STRING = time.strftime("%Y%m%d-%H")
-WHISPER_MODEL = "large-v3"
+WHISPER_MODEL = "medium.en"
 WHISPER_LANGUAGE = "en"
-TIME_BETWEEN_SPEECH = 1.2  # Time between speech segments in seconds
-THRESHOLD_AUDIO_VOLUME = -60.0  # Threshold for audio volume in dB
+TIME_BETWEEN_SPEECH = 2.0  # Time between speech segments in seconds
 POST_TO_DISCORD = False  # Whether to post transcriptions to Discord
 
 if not os.path.exists(f"./Sessions/{TODAY_STRING}"):
@@ -80,6 +83,8 @@ class CustomSink(discord.sinks.MP3Sink):
         self.audio_data = {}
         self.audio_buffer = {}
         self.audio_user_timers = {}
+        self.audio_processing_queue = Queue()
+        self.thread = Thread(target=self.worker, args=(self.audio_processing_queue,))
 
     def get_user_details(self, user_id):
         """Get a formatted string with player and character names based on user ID."""
@@ -92,59 +97,22 @@ class CustomSink(discord.sinks.MP3Sink):
         else:
             return str(user_id)  # Fallback to user ID
 
-    def is_audio_significant(self, file_path, threshold=THRESHOLD_AUDIO_VOLUME):
+    def trim_silence(self, file_path):
         """Check if the audio file's volume exceeds a certain threshold."""
         command = [
             "ffmpeg",
+            "-y",
             "-i",
             file_path,
             "-af",
-            "volumedetect",
-            "-vn",
-            "-sn",
-            "-dn",
-            "-f",
-            "null",
-            "/dev/null",
+            "areverse,silenceremove=start_periods=1:start_duration=0.05:start_silence=0.1:start_threshold=0.02,areverse,silenceremove=start_periods=1:start_duration=0.05:start_silence=0.1:start_threshold=0.02",
+            file_path.replace("-original.mp3", ".mp3"),
         ]
         result = subprocess.run(command, capture_output=True, text=True)
-        output = result.stderr
+        print(result.stderr)
+        return
 
-        # Extract the mean volume level
-        mean_volume = None
-        for line in output.split("\n"):
-            if "mean_volume" in line:
-                mean_volume = float(line.split(":")[1].strip().replace(" dB", ""))
-                break
-
-        if mean_volume is None:
-            return False  # Unable to determine, defaulting to False
-
-        return mean_volume > threshold
-
-    def send_transcription_as_user(self, user_id, transcription):
-        """Send a transcription to the discord channel as a user."""
-        user = next(
-            (member for member in self.channel.members if member.id == user_id), None
-        )
-        if POST_TO_DISCORD:
-            if user:
-                user_name = user.name
-                message_content = f"{user_name} said: {transcription}"
-                # if avatar_url:
-                #     message_content += f"\n{avatar_url}"
-
-                asyncio.run_coroutine_threadsafe(
-                    self.channel.send(message_content), self.bot.loop
-                )
-            else:
-                # Fallback if the user can't be found
-                asyncio.run_coroutine_threadsafe(
-                    self.channel.send(f"User ID {user_id} said: {transcription}"),
-                    self.bot.loop,
-                )
-
-    def transcribe_audio_in_background(self, file_path, user, start_time=None):
+    def transcribe_audio_in_queue(self, file_path, user, start_time=None):
         """Use a background thread to process audio asyncronously."""
         transcription = self.transcribe_audio(file_path)
         print(f"Transcription for {user}: {transcription}")
@@ -156,13 +124,33 @@ class CustomSink(discord.sinks.MP3Sink):
             with open(self.transcription_file, "a", encoding="utf-8") as f:
                 f.write(f"{start_time} : {name_or_id} : {transcription}\n")
 
+    # Worker function that processes items from the queue
+    def worker(self, queue):
+        while True:
+            item = queue.get()  # Retrieve an item from the queue
+            if item is None:
+                break  # Exit condition
+            self.transcribe_audio_in_queue(
+                item["file"], item["user"], item["start_time"]
+            )
+            queue.task_done()
+
     def transcribe_audio(self, file_path):
         """Call whisper to transcribe audio."""
-        model = whisper.load_model(WHISPER_MODEL)
-        result = model.transcribe(
-            file_path, language=WHISPER_LANGUAGE, word_timestamps=True
-        )
-        return result["text"]
+        device = (
+            "cuda" if torch.cuda.is_available() and USE_CUDA else "cpu"
+        )  # Check if CUDA is available
+        model = whisper.load_model(WHISPER_MODEL, device=device)
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 1024:
+            result = model.transcribe(
+                file_path,
+                initial_prompt=CORRECT_SPELLINGS,
+                language=WHISPER_LANGUAGE,
+                word_timestamps=True,
+            )
+            return result["text"]
+        else:
+            return ""
 
     @Filters.container
     def write(self, data, user):
@@ -190,7 +178,8 @@ class CustomSink(discord.sinks.MP3Sink):
 
     def save_speech_segment(self, audio_buffer, user):
         """Save a speech segment to a file and transcribe it."""
-        file_name = f"{user}_{int(time.time())}.{self.encoding}"
+        file_name = f"{user}_{int(time.time())}-original.{self.encoding}"
+        trimmed_name = f"{user}_{int(time.time())}.{self.encoding}"
         audio_buffer[user].file.seek(0)
         self.convert_to_mp3_and_save(audio_buffer[user].file, file_name)
         del audio_buffer[user]
@@ -199,19 +188,14 @@ class CustomSink(discord.sinks.MP3Sink):
         # Transcribe the saved mp3 file
         # Start a background thread for transcription
         # Check if the audio is significant before transcribing
-        if self.is_audio_significant(f"./Recordings/{file_name}"):
-            thread = Thread(
-                target=self.transcribe_audio_in_background,
-                args=(f"./Recordings/{file_name}", user, audio_buffer[user].start_time),
-            )
-            thread.start()
-
-        else:
-            # Handle silent audio (e.g., log it or notify)
-            print(
-                f"Audio from {user} is silent or too low volume. Skipping transcription."
-            )
-            os.remove(f"./Recordings/{file_name}")
+        self.trim_silence(f"./Recordings/{file_name}")
+        item = {}
+        item["user"] = user
+        item["file"] = f"./Recordings/{trimmed_name}"
+        item["start_time"] = audio_buffer[user].start_time
+        self.audio_processing_queue.put(item)
+        if not self.thread.is_alive():
+            self.thread.start()
 
     def convert_to_mp3_and_save(self, audio_data, file_name):
         """Convert audio data to mp3 and save it to a file."""
