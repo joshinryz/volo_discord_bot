@@ -65,14 +65,14 @@ if __name__ == "__main__":
 
                 bot._close_and_clean_sink_for_guild(guild_id)
 
-    @bot.slash_command(name="connect", description="Connect to your voice channel.")
+    @bot.slash_command(name="connect", description="Add VOLO to your voice party.")
     async def connect(ctx: discord.context.ApplicationContext):
         if bot._is_ready is False:
-            await ctx.respond("I am not ready yet. Try again later.", ephemeral=True)
+            await ctx.respond("Ahem, seems even the finest quills falter. 🛑 No connection, no tale. Try again, my dear adventurer.”", ephemeral=True)
             return
         author_vc = ctx.author.voice
         if not author_vc:
-            await ctx.respond("You are not in a voice channel.", ephemeral=True)
+            await ctx.respond("I'm sorry adventurer, but it appears your voice has not joined a party.", ephemeral=True)
             return
 
         await ctx.trigger_typing()
@@ -83,45 +83,47 @@ if __name__ == "__main__":
             helper.guild_id = guild_id
             helper.set_vc(vc)
             bot.guild_to_helper[guild_id] = helper
-            await ctx.respond(f"Connected to {author_vc.channel.name}.", ephemeral=True)
+            await ctx.respond(f"Ah, splendid! The lore shall now flow as freely as the finest ale. 🍺 Prepare to immortalize brilliance!", ephemeral=True)
             await ctx.guild.change_voice_state(channel=author_vc.channel, self_mute=True)
         except Exception as e:
             await ctx.respond(f"{e}", ephemeral=True)
+        #bot.start_recording(ctx)
 
-    @bot.slash_command(name="transcribe", description="Transcribe the voice channel.")
-    async def transcribe(ctx: discord.context.ApplicationContext):
+    @bot.slash_command(name="scribe", description="Ink the Saga of this adventure.")
+    async def ink(ctx: discord.context.ApplicationContext):
         await ctx.trigger_typing()
         bot.start_recording(ctx)
-        await ctx.respond("Starting to transcribe.", ephemeral=True)
+        await ctx.respond("Your words are now inscribed in the annals of history! ✍️ Fear not, for V.O.L.O leaves nothing unwritten", ephemeral=True)
     
-    @bot.slash_command(name="stop", description="Stop the transcription.")
+    @bot.slash_command(name="stop", description="Close the Tome on this adventure.")
     async def stop(ctx: discord.context.ApplicationContext):
         guild_id = ctx.guild_id
         helper = bot.guild_to_helper.get(guild_id, None)
         if not helper:
-            await ctx.respond("I am not in your voice channel.", ephemeral=True)
+            await ctx.respond("Well, that's akward. I dont seem to be in your party.", ephemeral=True)
             return
 
         bot_vc = helper.vc
         if not bot_vc:
-            await ctx.respond("I am not in your voice channel.", ephemeral=True)
+            await ctx.respond("Well, that's akward. I dont seem to be in your party.", ephemeral=True)
             return
 
         if not bot.guild_is_recording.get(guild_id, False):
-            await ctx.respond("I am not transcribing.", ephemeral=True)
+            await ctx.respond("Well, that’s awkward. 😐 The quill refuses to still itself... Shall I try again, or will you?", ephemeral=True)
             return
 
         await ctx.trigger_typing()
         if bot.guild_is_recording.get(guild_id, False):
             bot.stop_recording(ctx)
+            await ctx.respond("The quill rests. 🖋️ A pause, but not the end. Awaiting your next grand tale, of course!", ephemeral=True)
         
-    @bot.slash_command(name="disconnect", description="Disconnect from your voice channel.")
+    @bot.slash_command(name="disconnect", description="VOLO leaves your party. Goodbye, friend.")
     async def disconnect(ctx: discord.context.ApplicationContext):
         guild_id = ctx.guild_id
         helper = bot.guild_to_helper[guild_id]
         bot_vc = helper.vc
         if not bot_vc:
-            await ctx.respond("I am not in your voice channel.", ephemeral=True)
+            await ctx.respond("Well, that's akward. I dont seem to be in your party.", ephemeral=True)
             return
 
         await ctx.trigger_typing()
@@ -130,7 +132,7 @@ if __name__ == "__main__":
         helper.set_vc(None)
         bot.guild_to_helper.pop(guild_id, None)
 
-        await ctx.respond("Disconnected from VC.", ephemeral=True)
+        await ctx.respond("The tome is sealed! 📖 Another chapter well-told, another adventure preserved. You have my gratitude!", ephemeral=True)
 
 
     @bot.slash_command(name="help", description="Show the help message.")
@@ -149,7 +151,7 @@ if __name__ == "__main__":
         ]
 
         embed = discord.Embed(title="Volo Help 📖",
-                              description="""Volo is a bot that can record your voice channel and transcribe it. 🔉 ➡️ 📃""",
+                              description="""Summon the Lorekeeper’s Wisdom 🔉 ➡️ 📃""",
                               color=discord.Color.blue(),
                               fields=embed_fields)
 
