@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 WAKE_WORDS = ["ok billy", "yo billy", "okay billy", "hey billy"]
 
 
-class CoolNameBot(discord.Bot):
+class VoloBot(discord.Bot):
     def __init__(self, loop):
 
         super().__init__(command_prefix="!", loop=loop,
@@ -196,7 +196,7 @@ async def transcript_process(
         rabbit_conn,
         transcript_queue: asyncio.Queue,
         guild_id: int,
-        bot: CoolNameBot):
+        bot: VoloBot):
     transcript_publisher = TranscriptPublisher(rabbit_conn)
     await transcript_publisher.setup_connection()
 

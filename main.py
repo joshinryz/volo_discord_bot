@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import os
-
+from datetime import datetime
+import time
 import discord
 from dotenv import load_dotenv
 
@@ -17,27 +18,47 @@ logger = logging.getLogger()  # root logger
 
 def configure_logging():
     logging.getLogger('discord').setLevel(logging.WARNING)
-    logging.getLogger('aiormq').setLevel(logging.ERROR)
-    logging.getLogger('aio_pika').setLevel(logging.WARNING)
     logging.getLogger('asyncio').setLevel(logging.WARNING)
     logging.getLogger('faster_whisper').setLevel(logging.WARNING)
-    logging.getLogger('stripe').setLevel(logging.WARNING)
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('httpcore').setLevel(logging.WARNING)
+
+    # Ensure the directory exists
+    log_directory = '.logs/transcripts'
+    os.makedirs(log_directory, exist_ok=True)  # Create the directory if it doesn't exist
+
+    # Get the current date for the log file name
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    log_filename = os.path.join(log_directory, f"{current_date}-transcription.log")
+
+    # Custom logging format (date with milliseconds, message)
+    log_format = '%(asctime)s %(name)s: %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S.%f'[:-3]  # Trim to milliseconds
 
     if CLIArgs.verbose:
         logger.setLevel(logging.DEBUG)
         logging.basicConfig(level=logging.DEBUG,
-                            format='%(name)s: %(message)s')
-
+                            format=log_format,
+                            datefmt=date_format)
     else:
         logger.setLevel(logging.INFO)
         logging.basicConfig(level=logging.INFO,
-                            format='%(name)s: %(message)s')
+                            format=log_format,
+                            datefmt=date_format)
     
-    logger.setLevel(logging.DEBUG)
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(name)s: %(message)s')
+    # Set up the transcription logger
+    transcription_logger = logging.getLogger('transcription')
+    transcription_logger.setLevel(logging.INFO)
+
+    # File handler for transcription logs (with appending to existing file)
+    file_handler = logging.FileHandler(log_filename, mode='a')  # Append mode
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S.%f'[:-3]
+    ))
+
+    # Add the handler to the transcription logger
+    transcription_logger.addHandler(file_handler)
 
 if __name__ == "__main__":
     args = CommandLine.read_command_line()
@@ -47,10 +68,10 @@ if __name__ == "__main__":
 
     loop = asyncio.get_event_loop()
 
-    from src.bot.coolname_bot import CoolNameBot
+    from src.bot.volo_bot import VoloBot
 
 
-    bot = CoolNameBot(loop)
+    bot = VoloBot(loop)
 
     @bot.event
     async def on_voice_state_update(member, before, after):

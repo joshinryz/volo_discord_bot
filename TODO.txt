@@ -1,0 +1,2 @@
+[] Error Handling events such as /connect /scribe etc. Not well done.
+[] 

@@ -2,6 +2,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import io
 import logging
+import json
 import re
 import threading
 import time
@@ -255,23 +256,23 @@ class WhisperSink(Sink):
                     logger.debug(
                         f"[time, word timeout]: [{current_time}, {word_timeout}]"
                     )
-                    self.write_transcription_log(speaker, transcription)
                     self.loop.call_soon_threadsafe(
                         self.queue.put_nowait,
                         {"user": speaker.user, "result": speaker.phrase},
                     )
+                    self.write_transcription_log(speaker, transcription)
                     self.speakers.remove(speaker)
-                # elif current_time - speaker.last_phrase > self.max_phrase_timeout:
-                #     self.write_transcription_log(speaker, transcription)
-                #     logger.debug(
-                #         f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]"
-                #     )
-                #     #TODO: WTF DOES THIS DO?
-                #     self.loop.call_soon_threadsafe(
-                #         self.queue.put_nowait,
-                #         {"user": speaker.user, "result": speaker.phrase},
-                #     )
-                #     self.speakers.remove(speaker)
+                elif current_time - speaker.last_phrase > self.max_phrase_timeout:
+                    
+                    logger.debug(
+                        f"[time, max phrase timeout]: [{current_time}, {speaker.last_phrase}]"
+                    )
+                    self.loop.call_soon_threadsafe(
+                        self.queue.put_nowait,
+                        {"user": speaker.user, "result": speaker.phrase},
+                    )
+                    self.write_transcription_log(speaker, transcription)
+                    self.speakers.remove(speaker)
             elif current_time - speaker.last_phrase > self.quiet_phrase_timeout * 2:
                 # Remove the speaker if no valid phrase detected after set period of time
                 logger.debug(
@@ -280,14 +281,29 @@ class WhisperSink(Sink):
                 self.speakers.remove(speaker)
 
     def write_transcription_log(self, speaker, transcription):
-        output = (
-            f"Begin: {datetime.fromtimestamp(speaker.first_word).strftime('%H:%M:%S'): <10}\n"
-            f"End: {datetime.fromtimestamp(speaker.last_word).strftime('%H:%M:%S'): <10}\n"
-            f"Phrase: {datetime.fromtimestamp(speaker.last_phrase).strftime('%H:%M:%S'): <10}\n"
-            f"User_ID: {speaker.user: <15} :: {speaker.phrase: <30}\n"
-        )
-        print(output)
-    # Im not running an alexa, remove this.
+        # Convert first_word and last_word Unix timestamps to datetime
+        first_word_time = datetime.fromtimestamp(speaker.first_word).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        last_word_time = datetime.fromtimestamp(speaker.last_word).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+        # Prepare the log data as a dictionary
+        log_data = {
+            "date": first_word_time[:10],                  # Date (from first_word)
+            "first_word_time": first_word_time[11:],       # First word time (HH:MM:SS.ss)
+            "last_word_time": last_word_time[11:],         # Last word time (HH:MM:SS.ss)
+            "user_id": speaker.user,                       # User ID
+            "event_source": "Discord",                     # Event source
+            "data": transcription                          # Transcription text
+        }
+
+        # Convert the log data to JSON
+        log_message = json.dumps(log_data)
+
+        # Get the transcription logger
+        transcription_logger = logging.getLogger('transcription')
+
+        # Log the message
+        transcription_logger.info(log_message)
+    
     def update_speaker_status(
         self, speaker, transcription, current_time, speaker_new_bytes
     ):
