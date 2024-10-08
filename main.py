@@ -52,15 +52,6 @@ if __name__ == "__main__":
 
     bot = CoolNameBot(loop)
 
-    if not discord.opus.is_loaded():
-        try:
-            discord.opus.load_opus("opus")
-        except OSError:
-            discord.opus.load_opus("/usr/lib64/libopus.so")
-        except Exception as e:
-            logger.error(f"Error loading opus library: {e}")
-            raise e
-
     @bot.event
     async def on_voice_state_update(member, before, after):
         if member.id == bot.user.id:
