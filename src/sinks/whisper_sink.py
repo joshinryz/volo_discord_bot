@@ -13,15 +13,21 @@ from typing import List
 
 import speech_recognition as sr
 from discord.sinks.core import Filters, Sink, default_filters
-#import whisper
-from faster_whisper import WhisperModel
-
+import whisper
+#from faster_whisper import WhisperModel
+import torch
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+from datasets import load_dataset
 WHISPER_MODEL = "medium.en"
 WHISPER_LANGUAGE = "en"
 
-audio_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="float32")
+#audio_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="float32")
 #audio_model = whisper.load_model(WHISPER_MODEL, device="cpu", compute_type="float32")
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+audio_model = whisper.load_model(WHISPER_MODEL, device=device)
+
+# Set the model to evaluation mode (important for inference)
 logger = logging.getLogger(__name__)
 
 
@@ -30,12 +36,10 @@ class Speaker:
     A class to store the audio data and transcription for each user.
     """
 
-    def __init__(self, user, data):
+    def __init__(self, user, data, current_time):
         self.user = user
         self.data = [data]
 
-        current_time = time.time()
-        first_time = current_time
         self.last_word = current_time
         self.last_phrase = current_time
 
@@ -100,6 +104,7 @@ class WhisperSink(Sink):
         self.speakers: List[Speaker] = []
         self.voice_queue = Queue()
         self.executor = ThreadPoolExecutor(max_workers=8)  # TODO: Adjust this
+
 
     def start_voice_thread(self, on_exception=None):
         def thread_exception_hook(args):
@@ -183,15 +188,15 @@ class WhisperSink(Sink):
                 # Process the voice_queue
                 while not self.voice_queue.empty():
                     item = self.voice_queue.get()
-
                     # Find or create a speaker
                     speaker = next(
                         (s for s in self.speakers if s.user == item[0]), None)
                     if speaker:
                         speaker.data.append(item[1])
                         speaker.new_bytes += 1
+                        speaker.last_word = item[2]
                     elif self.max_speakers < 0 or len(self.speakers) <= self.max_speakers:
-                        self.speakers.append(Speaker(item[0], item[1]))
+                        self.speakers.append(Speaker(item[0], item[1], item[2]))
 
                 # Transcribe audio for each speaker
                 future_to_speaker = {}
@@ -234,17 +239,19 @@ class WhisperSink(Sink):
             word_timeout = speaker.word_timeout
             if len(speaker.phrase) >= self.min_phrase_length:
                 # If the user stops saying anything new or has been speaking too long.
-                logger.debug(
-                    f"[time, word timeout]: [{current_time}, {word_timeout}]")
-                if (
-                    current_time - speaker.last_word > word_timeout
-                    or current_time - speaker.last_phrase > self.max_phrase_timeout
-                ):
+                if current_time - speaker.last_word > word_timeout:
+                    logger.debug(f"[time, word timeout]: [{current_time}, {word_timeout}]")
+                    self.loop.call_soon_threadsafe(self.queue.put_nowait, {
+                        "user": speaker.user, "result": speaker.phrase})
+                    self.speakers.remove(speaker)
+                elif current_time - speaker.last_phrase > self.max_phrase_timeout:
+                    logger.debug(f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]")
                     self.loop.call_soon_threadsafe(self.queue.put_nowait, {
                         "user": speaker.user, "result": speaker.phrase})
                     self.speakers.remove(speaker)
             elif current_time - speaker.last_phrase > self.quiet_phrase_timeout * 2:
                 # Remove the speaker if no valid phrase detected after set period of time
+                logger.debug(f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]")
                 self.speakers.remove(speaker)
 
     def write_transcription_log(self, speaker, transcription, current_time, speaker_new_bytes):
@@ -261,7 +268,6 @@ class WhisperSink(Sink):
                 speaker.word_timeout = round(
                     speaker.word_timeout * self.mid_sentence_multiplier, 3)
             speaker.phrase = transcription
-            speaker.last_word = current_time
         elif speaker.empty_bytes_counter > 5:
             speaker.data = speaker.data[:-speaker_new_bytes]
         else:
@@ -276,9 +282,9 @@ class WhisperSink(Sink):
         data_len = len(data)
         if data_len > self.data_length:
             data = data[-self.data_length:]
-
+        last_word = time.time()
         # Send bytes to be transcribed
-        self.voice_queue.put_nowait([user, data])
+        self.voice_queue.put_nowait([user, data, last_word])
 
     def close(self):
         logger.debug("Closing whisper sink.")

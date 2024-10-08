@@ -140,11 +140,11 @@ class CoolNameBot(discord.Bot):
             self.loop,
             data_length=50000,
             shared_ctx=ctx,
-            quiet_phrase_timeout=1.0,
-            mid_sentence_multiplier=1.2,
+            quiet_phrase_timeout=2.0,
+            mid_sentence_multiplier=1.5,
             no_data_multiplier=0.55,
-            max_phrase_timeout=30,
-            min_phrase_length=5,
+            max_phrase_timeout=60,
+            min_phrase_length=2,
             max_speakers=10
         )
 
