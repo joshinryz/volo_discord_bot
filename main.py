@@ -10,7 +10,6 @@ from src.utils.commandline import CommandLine
 from src.bot.helper import BotHelper
 
 load_dotenv()
-
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 logger = logging.getLogger()  # root logger
@@ -25,6 +24,7 @@ def configure_logging():
     logging.getLogger('stripe').setLevel(logging.WARNING)
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('httpcore').setLevel(logging.WARNING)
+    logging.getLogger('whisper').setLevel(logging.WARNING)
 
     if CLIArgs.verbose:
         logger.setLevel(logging.DEBUG)
@@ -35,7 +35,10 @@ def configure_logging():
         logger.setLevel(logging.INFO)
         logging.basicConfig(level=logging.INFO,
                             format='%(name)s: %(message)s')
-
+    
+    logger.setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(name)s: %(message)s')
 
 if __name__ == "__main__":
     args = CommandLine.read_command_line()
@@ -49,16 +52,6 @@ if __name__ == "__main__":
 
 
     bot = CoolNameBot(loop)
-
-    if not discord.opus.is_loaded():
-        try:
-            discord.opus.load_opus("opus")
-        except OSError:
-            # make this OS independenet
-            discord.opus.load_opus("/opt/homebrew/lib/libopus.dylib")
-        except Exception as e:
-            logger.error(f"Error loading opus library: {e}")
-            raise e
 
     @bot.event
     async def on_voice_state_update(member, before, after):
@@ -78,7 +71,6 @@ if __name__ == "__main__":
         if bot._is_ready is False:
             await ctx.respond("I am not ready yet. Try again later.", ephemeral=True)
             return
-
         author_vc = ctx.author.voice
         if not author_vc:
             await ctx.respond("You are not in a voice channel.", ephemeral=True)
@@ -93,6 +85,7 @@ if __name__ == "__main__":
             helper.set_vc(vc)
             bot.guild_to_helper[guild_id] = helper
             await ctx.respond(f"Connected to {author_vc.channel.name}.", ephemeral=True)
+            await ctx.guild.change_voice_state(channel=author_vc.channel, self_mute=True)
         except Exception as e:
             await ctx.respond(f"{e}", ephemeral=True)
 
@@ -118,45 +111,6 @@ if __name__ == "__main__":
 
         await ctx.respond("Disconnected from VC.", ephemeral=True)
 
-    @bot.slash_command(name="resume", description="Resume music playback.")
-    async def resume(ctx: discord.context.ApplicationContext):
-        helper = bot.guild_to_helper.get(ctx.guild_id, None)
-        if helper and helper.resume_music():
-            await ctx.respond("Resuming music.", ephemeral=True)
-        else:
-            await ctx.respond("No music to resume.", ephemeral=True)
-
-    @bot.slash_command(name="pause", description="Pause music playback.")
-    async def pause(ctx: discord.context.ApplicationContext):
-        helper = bot.guild_to_helper.get(ctx.guild_id, None)
-        if helper and helper.pause_music():
-            await ctx.respond("Pausing music.", ephemeral=True)
-        else:
-            await ctx.respond("No music is playing.", ephemeral=True)
-
-    @bot.slash_command(name="stop", description="Stop music playback.")
-    async def stop(ctx: discord.context.ApplicationContext):
-        helper = bot.guild_to_helper.get(ctx.guild_id, None)
-        if helper and helper.stop_music():
-            await ctx.respond("Stopping music.", ephemeral=True)
-        else:
-            await ctx.respond("No music is playing.", ephemeral=True)
-
-    @bot.slash_command(name="volume", description="Set the volume.")
-    async def volume(ctx: discord.context.ApplicationContext, value: discord.Option(int)):
-        helper = bot.guild_to_helper.get(ctx.guild_id, None)
-        helper.set_volume(value)
-        await ctx.respond(f"Volume set to {value}.", ephemeral=True)
-
-    @bot.slash_command(name="play", description="Play a song (Supports YouTube and other audio URLs).")
-    async def play(ctx: discord.context.ApplicationContext, url: str):
-        helper = bot.guild_to_helper.get(ctx.guild_id, None)
-        try:
-            await helper.play_youtube(url)
-            await ctx.respond(f"Playing {url}.", ephemeral=True)
-        except Exception as e:
-            await ctx.respond(f"Could not play {url}.", ephemeral=True)
-            logger.error(f"Error playing {url}: {e}")
 
     @bot.slash_command(name="help", description="Show the help message.")
     async def help(ctx: discord.context.ApplicationContext):
@@ -183,49 +137,7 @@ if __name__ == "__main__":
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @bot.slash_command(name="voice_get", description="Get the current voice used for TTS.")
-    async def voice_get(ctx: discord.context.ApplicationContext):
-        res = bot.supabase.from_('guild_settings').select(
-            'voice').eq('guild_id', ctx.guild_id).execute()
 
-        stored_voice = res.data[0].get('voice', None)
-        if stored_voice:
-            await ctx.respond(f"Current voice: {get_voice_name(stored_voice)}.", ephemeral=True)
-        else:
-            helper = bot.guild_to_helper.get(ctx.guild_id, None)
-            if helper:
-                await ctx.respond(f"Current voice: {helper.voice}.", ephemeral=True)
-            else:
-                await ctx.respond("HeyBilly must be in a voice channel first.", ephemeral=True)
-
-    @bot.slash_command(name="voice_set", description="Set the current voice used for TTS.")
-    @discord.default_permissions(manage_messages=True)
-    async def voice_set(ctx: discord.context.ApplicationContext, voice: discord.Option(str, choices=[
-        discord.OptionChoice(name=name, value=voice) for voice, name in TTS_VOICE_MAP.items()
-    ])):
-        try:
-            helper = bot.guild_to_helper.get(ctx.guild_id, None)
-
-            if helper:
-                helper.set_voice(voice)
-                await ctx.respond(f"Voice set to {get_voice_name(voice)}.", ephemeral=True)
-            else:
-                await ctx.respond("HeyBilly must be in a voice channel first.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error setting voice: {e}")
-            await ctx.respond(f"Error setting voice. Try again later.", ephemeral=True)
-
-    @bot.slash_command(name="playing", description="Show what's currently playing.")
-    async def playing(ctx: discord.context.ApplicationContext):
-        helper = bot.guild_to_helper.get(ctx.guild_id, None)
-        if helper:
-            music_source_url = helper.current_music_source_url
-            if music_source_url:
-                await ctx.respond(f"Currently playing: {music_source_url}", ephemeral=True)
-            else:
-                await ctx.respond("No music is playing.", ephemeral=True)
-        else:
-            await ctx.respond("HeyBilly is not in a voice channel.", ephemeral=True)
 
     try:
         loop.run_until_complete(bot.start(DISCORD_BOT_TOKEN))

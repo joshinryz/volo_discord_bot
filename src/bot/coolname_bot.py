@@ -22,7 +22,7 @@ class CoolNameBot(discord.Bot):
     def __init__(self, loop):
 
         super().__init__(command_prefix="!", loop=loop,
-                         activity=discord.CustomActivity(name='Listening for "Hey Billy"'))
+                         activity=discord.CustomActivity(name='Transcribing Audio to Text'))
         self.guild_to_helper = {}
         self.action_queue = asyncio.Queue()
         self.guild_is_recording = {}
@@ -114,13 +114,6 @@ class CoolNameBot(discord.Bot):
         subscription checks and limits.
         """
         try:
-            logger.debug(f"Checking if guild {ctx.guild_id} is activated.")
-            has_plan = StripeCustomer.has_active_plan(ctx.guild_id)
-            if not has_plan:
-                logger.warning(
-                    f"No active plan for guild {ctx.guild_id}. Not starting whisper sink.")
-                return
-
             self.start_whisper_sink(ctx)
             self.guild_is_recording[ctx.guild_id] = True
         except Exception as e:
@@ -139,18 +132,18 @@ class CoolNameBot(discord.Bot):
             self._close_and_clean_sink_for_guild(ctx.guild_id)
 
         transcript_queue = asyncio.Queue()
-        t = self.loop.create_task(transcript_process(
-            self.rabbit_conn, transcript_queue, ctx.guild_id, self))
-        self.guild_whisper_message_tasks[ctx.guild_id] = t
+        #t = self.loop.create_task(transcript_process(self.rabbit_conn, transcript_queue, ctx.guild_id, self))
+        #self.guild_whisper_message_tasks[ctx.guild_id] = t
 
         whisper_sink = WhisperSink(
             transcript_queue,
             self.loop,
             data_length=50000,
-            quiet_phrase_timeout=0.5,
+            shared_ctx=ctx,
+            quiet_phrase_timeout=1.0,
             mid_sentence_multiplier=1.2,
             no_data_multiplier=0.55,
-            max_phrase_timeout=15,
+            max_phrase_timeout=30,
             min_phrase_length=5,
             max_speakers=10
         )

@@ -27,7 +27,15 @@ class BotHelper:
 
         self.vc = None
 
-
+    def set_vc(self, voice_client):
+        self.vc = voice_client
+        if voice_client is None:
+            self.tts_queue = None
+            self.current_music_source = None
+            self.current_sfx_source = None
+            logger.debug(
+                "Voice client set to None. Clearing tts queue and current music source.")
+            return
 
     async def send_message(self, channel_id, content, embed=None, tts=False):
         channel = self.bot.get_channel(channel_id)

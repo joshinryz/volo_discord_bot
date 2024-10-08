@@ -7,18 +7,20 @@ import threading
 import time
 import wave
 from queue import Queue
+import pika
 from tempfile import NamedTemporaryFile
 from typing import List
 
 import speech_recognition as sr
 from discord.sinks.core import Filters, Sink, default_filters
-import whisper
+#import whisper
+from faster_whisper import WhisperModel
 
 WHISPER_MODEL = "medium.en"
 WHISPER_LANGUAGE = "en"
 
-#audio_model = WhisperModel("medium.en", device="cpu", compute_type="float32")
-audio_model = whisper.load_model(WHISPER_MODEL, device="cpu")
+audio_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="float32")
+#audio_model = whisper.load_model(WHISPER_MODEL, device="cpu", compute_type="float32")
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ class Speaker:
         self.data = [data]
 
         current_time = time.time()
+        first_time = current_time
         self.last_word = current_time
         self.last_phrase = current_time
 
@@ -66,6 +69,7 @@ class WhisperSink(Sink):
         loop: asyncio.AbstractEventLoop,
         *,
         filters=None,
+        shared_ctx=None,
         data_length=50000,
         quiet_phrase_timeout=1,
         mid_sentence_multiplier=1.8,
@@ -81,7 +85,7 @@ class WhisperSink(Sink):
             filters = default_filters
         self.filters = filters
         Filters.__init__(self, **self.filters)
-
+        self.shared_ctx = shared_ctx
         self.data_length = data_length
         self.quiet_phrase_timeout = quiet_phrase_timeout
         self.mid_sentence_multiplier = mid_sentence_multiplier
@@ -209,8 +213,8 @@ class WhisperSink(Sink):
                         current_time = time.time()
                         speaker_new_bytes = speaker.new_bytes
 
-                        #self.update_speaker_status(
-                        #    speaker, transcription, current_time, speaker_new_bytes)
+                        self.update_speaker_status(
+                            speaker, transcription, current_time, speaker_new_bytes)
                         self.write_transcription_log(
                             speaker, transcription, current_time, speaker_new_bytes)
                     except Exception as e:
@@ -244,26 +248,24 @@ class WhisperSink(Sink):
                 self.speakers.remove(speaker)
 
     def write_transcription_log(self, speaker, transcription, current_time, speaker_new_bytes):
-        logger.debug(
-            f"Speaker: {speaker.user} :: {speaker.phrase} :: {transcription}")
+        logger.info(f"Time: {speaker.last_word} Speaker: {speaker.user} :: {speaker.phrase}")
 
+        
     # Im not running an alexa, remove this.
-    # def update_speaker_status(self, speaker, transcription, current_time, speaker_new_bytes):
-    #     # If the transcription is different from the last one, reset the word timeout
-    #     if speaker.phrase != transcription:
-    #         logger.debug(
-    #             f"speaker.phrase != transcription: {speaker.phrase} :: {transcription}")
-    #         speaker.empty_bytes_counter = 0
-    #         speaker.word_timeout = self.quiet_phrase_timeout
-    #         if re.search(r"\s*\.{2,}$", transcription) or not re.search(r"[.!?]$", transcription):
-    #             speaker.word_timeout = round(
-    #                 speaker.word_timeout * self.mid_sentence_multiplier, 3)
-    #         speaker.phrase = transcription
-    #         speaker.last_word = current_time
-    #     elif speaker.empty_bytes_counter > 5:
-    #         speaker.data = speaker.data[:-speaker_new_bytes]
-    #     else:
-    #         speaker.empty_bytes_counter += 1
+    def update_speaker_status(self, speaker, transcription, current_time, speaker_new_bytes):
+        # If the transcription is different from the last one, reset the word timeout
+        if speaker.phrase != transcription:
+            speaker.empty_bytes_counter = 0
+            speaker.word_timeout = self.quiet_phrase_timeout
+            if re.search(r"\s*\.{2,}$", transcription) or not re.search(r"[.!?]$", transcription):
+                speaker.word_timeout = round(
+                    speaker.word_timeout * self.mid_sentence_multiplier, 3)
+            speaker.phrase = transcription
+            speaker.last_word = current_time
+        elif speaker.empty_bytes_counter > 5:
+            speaker.data = speaker.data[:-speaker_new_bytes]
+        else:
+            speaker.empty_bytes_counter += 1
 
     @Filters.container
     def write(self, data, user):
