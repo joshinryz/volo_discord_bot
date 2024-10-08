@@ -24,7 +24,6 @@ def configure_logging():
     logging.getLogger('stripe').setLevel(logging.WARNING)
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('httpcore').setLevel(logging.WARNING)
-    logging.getLogger('whisper').setLevel(logging.WARNING)
 
     if CLIArgs.verbose:
         logger.setLevel(logging.DEBUG)
@@ -52,6 +51,15 @@ if __name__ == "__main__":
 
 
     bot = CoolNameBot(loop)
+
+    if not discord.opus.is_loaded():
+        try:
+            discord.opus.load_opus("opus")
+        except OSError:
+            discord.opus.load_opus("/usr/lib64/libopus.so")
+        except Exception as e:
+            logger.error(f"Error loading opus library: {e}")
+            raise e
 
     @bot.event
     async def on_voice_state_update(member, before, after):
@@ -89,8 +97,33 @@ if __name__ == "__main__":
         except Exception as e:
             await ctx.respond(f"{e}", ephemeral=True)
 
+    @bot.slash_command(name="transcribe", description="Transcribe the voice channel.")
+    async def transcribe(ctx: discord.context.ApplicationContext):
+        await ctx.trigger_typing()
         bot.start_recording(ctx)
+        await ctx.respond("Starting to transcribe.", ephemeral=True)
+    
+    @bot.slash_command(name="stop", description="Stop the transcription.")
+    async def stop(ctx: discord.context.ApplicationContext):
+        guild_id = ctx.guild_id
+        helper = bot.guild_to_helper.get(guild_id, None)
+        if not helper:
+            await ctx.respond("I am not in your voice channel.", ephemeral=True)
+            return
 
+        bot_vc = helper.vc
+        if not bot_vc:
+            await ctx.respond("I am not in your voice channel.", ephemeral=True)
+            return
+
+        if not bot.guild_is_recording.get(guild_id, False):
+            await ctx.respond("I am not transcribing.", ephemeral=True)
+            return
+
+        await ctx.trigger_typing()
+        if bot.guild_is_recording.get(guild_id, False):
+            bot.stop_recording(ctx)
+        
     @bot.slash_command(name="disconnect", description="Disconnect from your voice channel.")
     async def disconnect(ctx: discord.context.ApplicationContext):
         guild_id = ctx.guild_id
@@ -101,9 +134,6 @@ if __name__ == "__main__":
             return
 
         await ctx.trigger_typing()
-        if bot.guild_is_recording.get(guild_id, False):
-            bot.stop_recording(ctx)
-
         await bot_vc.disconnect()
         helper.guild_id = None
         helper.set_vc(None)
@@ -118,20 +148,17 @@ if __name__ == "__main__":
             discord.EmbedField(
                 name="/connect", value="Connect to your voice channel.", inline=True),
             discord.EmbedField(
-                name="Hey Billy, tell me a long story about a cat with my name.", value="Billy can come up with fun stories for you."),
+                name="/disconnect", value="Disconnect from your voice channel.", inline=True),
             discord.EmbedField(
-                name="Hey Billy, how's the weather in Tokyo?", value="Billy can fetch real-time data.\nAsk Billy about sports, stocks, currency conversions and more!"),
+                name="/transcribe", value="Transcribe the voice channel.", inline=True),
             discord.EmbedField(
-                name="Okay Billy, post a good morning GIF.", value="Billy can post all kinds of GIFs.\nYou can also ask him to post images and videos."),
+                name="/stop", value="Stop the transcription.", inline=True),
             discord.EmbedField(
-                name="Yo Billy, post Blank Space by Taylor Swift.", value="Billy can post *and* play music for you.\nOptional: Use the `/play` command for your own URLs."),
-            discord.EmbedField(
-                name="Yo Billy, play cricket sound effects.", value="Billy can play sound effects without interrupting the music."
-            )
+                name="/help", value="Show the help message.", inline=True),
         ]
 
-        embed = discord.Embed(title="HeyBilly Help",
-                              description="""HeyBilly is Discord's most advanced voice assistant. Say "Hey Billy, play some smooth jazz" and he will play some smooth jazz. He can post news stories, play sound effects, and much more! Here are some commands to get you started.""",
+        embed = discord.Embed(title="Volo Help 📖",
+                              description="""Volo is a bot that can record your voice channel and transcribe it. 🔉 ➡️ 📃""",
                               color=discord.Color.blue(),
                               fields=embed_fields)
 
