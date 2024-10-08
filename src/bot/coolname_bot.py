@@ -77,9 +77,9 @@ class CoolNameBot(discord.Bot):
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user}.")
-        await self.start_consumers()
+        #await self.start_consumers()
 
-        self.loop.create_task(self.process_actions())
+        #self.loop.create_task(self.process_actions())
         self._is_ready = True
 
 
@@ -143,7 +143,7 @@ class CoolNameBot(discord.Bot):
             quiet_phrase_timeout=2.0,
             mid_sentence_multiplier=1.5,
             no_data_multiplier=0.55,
-            max_phrase_timeout=60,
+            max_phrase_timeout=120,
             min_phrase_length=2,
             max_speakers=10
         )

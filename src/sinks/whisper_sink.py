@@ -6,23 +6,27 @@ import re
 import threading
 import time
 import wave
+from scipy.io import wavfile
+from scipy.signal import resample
+import numpy as np
 from queue import Queue
 import pika
+import torch
+import tempfile
 from tempfile import NamedTemporaryFile
 from typing import List
 
 import speech_recognition as sr
 from discord.sinks.core import Filters, Sink, default_filters
 import whisper
-#from faster_whisper import WhisperModel
-import torch
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-from datasets import load_dataset
-WHISPER_MODEL = "medium.en"
+
+# from faster_whisper import WhisperModel
+
+WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "en"
 
-#audio_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="float32")
-#audio_model = whisper.load_model(WHISPER_MODEL, device="cpu", compute_type="float32")
+# audio_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="float32")
+# audio_model = whisper.load_model(WHISPER_MODEL, device="cpu", compute_type="float32")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 audio_model = whisper.load_model(WHISPER_MODEL, device=device)
@@ -39,7 +43,7 @@ class Speaker:
     def __init__(self, user, data, current_time):
         self.user = user
         self.data = [data]
-
+        self.first_word = time.time()
         self.last_word = current_time
         self.last_phrase = current_time
 
@@ -80,7 +84,7 @@ class WhisperSink(Sink):
         no_data_multiplier=0.75,
         max_phrase_timeout=30,
         min_phrase_length=3,
-        max_speakers=-1
+        max_speakers=-1,
     ):
         self.queue = transcript_queue
         self.loop = loop
@@ -105,16 +109,18 @@ class WhisperSink(Sink):
         self.voice_queue = Queue()
         self.executor = ThreadPoolExecutor(max_workers=8)  # TODO: Adjust this
 
-
     def start_voice_thread(self, on_exception=None):
         def thread_exception_hook(args):
             logger.debug(
-                f"""Exception in voice thread: {args} Likely disconnected while listening.""")
+                f"""Exception in voice thread: {args} Likely disconnected while listening."""
+            )
 
         logger.debug(
-            f"Starting whisper sink thread for guild {self.vc.channel.guild.id}.")
+            f"Starting whisper sink thread for guild {self.vc.channel.guild.id}."
+        )
         self.voice_thread = threading.Thread(
-            target=self.insert_voice, args=(), daemon=True)
+            target=self.insert_voice, args=(), daemon=True
+        )
 
         if on_exception:
             threading.excepthook = on_exception
@@ -131,28 +137,45 @@ class WhisperSink(Sink):
             logger.error(f"Unexpected error during thread join: {e}")
         finally:
             logger.debug(
-                f"A sink thread was stopped for guild {self.vc.channel.guild.id}.")
-
-    def transcribe_audio(self, temp_file):
-        try:
-            # The whisper model
-            segments, info = audio_model.transcribe(
-                temp_file,
-                beam_size=10,
-                best_of=3,
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=150,
-                    threshold=0.8
-                ),
-                no_speech_threshold=0.6,
-                initial_prompt="Transcription bot is listening...",
+                f"A sink thread was stopped for guild {self.vc.channel.guild.id}."
             )
 
-            segments = list(segments)
+    def transcribe_audio(self, buff):
+        try:
+            # Step 1: Save the buffer to a temp file (if needed)
+            with tempfile.NamedTemporaryFile('wb+', delete=False, suffix='.wav') as file:
+                buff.seek(0)
+                file.write(buff.read())
+                file.flush()  # Ensure everything is written to disk
+                temp_file_name = file.name  # Store the file name
+
+            # Step 2: Load the audio using scipy.io.wavfile
+            sample_rate, audio = wavfile.read(temp_file_name)
+
+            # Step 3: Convert stereo to mono (if necessary)
+            if len(audio.shape) > 1 and audio.shape[1] == 2:
+                audio = np.mean(audio, axis=1)
+
+            # Step 4: Resample to 16 kHz if necessary
+            if sample_rate != 16000:
+                num_samples = int(len(audio) * 16000 / sample_rate)
+                audio = resample(audio, num_samples)
+                sample_rate = 16000
+
+            # Step 5: Ensure the audio is in float32 format (if it's not already)
+            if audio.dtype != np.float32:
+                audio = audio.astype(np.float32)
+
+            result = audio_model.transcribe(
+                temp_file_name,
+                language='EN',
+                no_speech_threshold=0.6,
+            )
+
+            segments = list(result['segments'])
             result = ""
             for segment in segments:
-                result += segment.text
+                result += segment['text']
 
             return result
         except Exception as e:
@@ -172,12 +195,12 @@ class WhisperSink(Sink):
         with wave.open(wav_io, "wb") as wave_writer:
             wave_writer.setnchannels(self.vc.decoder.CHANNELS)
             wave_writer.setsampwidth(
-                self.vc.decoder.SAMPLE_SIZE // self.vc.decoder.CHANNELS)
+                self.vc.decoder.SAMPLE_SIZE // self.vc.decoder.CHANNELS
+            )
             wave_writer.setframerate(self.vc.decoder.SAMPLING_RATE)
             wave_writer.writeframes(wav_data.getvalue())
 
         wav_io.seek(0)
-
         transcription = self.transcribe_audio(wav_io)
 
         return transcription
@@ -190,12 +213,15 @@ class WhisperSink(Sink):
                     item = self.voice_queue.get()
                     # Find or create a speaker
                     speaker = next(
-                        (s for s in self.speakers if s.user == item[0]), None)
+                        (s for s in self.speakers if s.user == item[0]), None
+                    )
                     if speaker:
                         speaker.data.append(item[1])
                         speaker.new_bytes += 1
                         speaker.last_word = item[2]
-                    elif self.max_speakers < 0 or len(self.speakers) <= self.max_speakers:
+                    elif (
+                        self.max_speakers < 0 or len(self.speakers) <= self.max_speakers
+                    ):
                         self.speakers.append(Speaker(item[0], item[1], item[2]))
 
                 # Transcribe audio for each speaker
@@ -209,7 +235,8 @@ class WhisperSink(Sink):
                     else:
                         # No data coming in from discord, reduces word_timeout for faster inference
                         speaker.word_timeout = round(
-                            speaker.word_timeout * self.no_data_multiplier, 2)
+                            speaker.word_timeout * self.no_data_multiplier, 2
+                        )
 
                 for future in future_to_speaker:
                     speaker = future_to_speaker[future]
@@ -219,54 +246,77 @@ class WhisperSink(Sink):
                         speaker_new_bytes = speaker.new_bytes
 
                         self.update_speaker_status(
-                            speaker, transcription, current_time, speaker_new_bytes)
-                        self.write_transcription_log(
-                            speaker, transcription, current_time, speaker_new_bytes)
+                            speaker, transcription, current_time, speaker_new_bytes
+                        )
+                        self.check_speaker_timeouts(
+                            speaker, transcription
+                        )
                     except Exception as e:
                         logger.warn(f"Error in insert_voice future: {e}")
 
-                self.check_speaker_timeouts()
+                
 
                 # Loops with no wait time is bad
                 time.sleep(0.1)
             except Exception as e:
                 logger.error(f"Error in insert_voice: {e}")
 
-    def check_speaker_timeouts(self):
+    def check_speaker_timeouts(self, current_speaker, transcription):
         current_time = time.time()
         # Copy the list to avoid modification during iteration
         for speaker in self.speakers[:]:
+            if current_speaker.user != speaker.user:
+                continue
             word_timeout = speaker.word_timeout
             if len(speaker.phrase) >= self.min_phrase_length:
                 # If the user stops saying anything new or has been speaking too long.
                 if current_time - speaker.last_word > word_timeout:
-                    logger.debug(f"[time, word timeout]: [{current_time}, {word_timeout}]")
-                    self.loop.call_soon_threadsafe(self.queue.put_nowait, {
-                        "user": speaker.user, "result": speaker.phrase})
+                    logger.debug(
+                        f"[time, word timeout]: [{current_time}, {word_timeout}]"
+                    )
+                    self.write_transcription_log(speaker, transcription)
+                    self.loop.call_soon_threadsafe(
+                        self.queue.put_nowait,
+                        {"user": speaker.user, "result": speaker.phrase},
+                    )
                     self.speakers.remove(speaker)
-                elif current_time - speaker.last_phrase > self.max_phrase_timeout:
-                    logger.debug(f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]")
-                    self.loop.call_soon_threadsafe(self.queue.put_nowait, {
-                        "user": speaker.user, "result": speaker.phrase})
-                    self.speakers.remove(speaker)
+                # elif current_time - speaker.last_phrase > self.max_phrase_timeout:
+                #     self.write_transcription_log(speaker, transcription)
+                #     logger.debug(
+                #         f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]"
+                #     )
+                #     #TODO: WTF DOES THIS DO?
+                #     self.loop.call_soon_threadsafe(
+                #         self.queue.put_nowait,
+                #         {"user": speaker.user, "result": speaker.phrase},
+                #     )
+                #     self.speakers.remove(speaker)
             elif current_time - speaker.last_phrase > self.quiet_phrase_timeout * 2:
                 # Remove the speaker if no valid phrase detected after set period of time
-                logger.debug(f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]")
+                logger.debug(
+                    f"[time, phrase timeout]: [{current_time}, {speaker.last_phrase}]"
+                )
                 self.speakers.remove(speaker)
 
-    def write_transcription_log(self, speaker, transcription, current_time, speaker_new_bytes):
-        logger.info(f"Time: {speaker.last_word} Speaker: {speaker.user} :: {speaker.phrase}")
+    def write_transcription_log(self, speaker, transcription):
+        logger.info(
+            f"Begin: {speaker.first_word} End: {speaker.last_word} User_ID: {speaker.user} :: {speaker.phrase}"
+        )
 
-        
     # Im not running an alexa, remove this.
-    def update_speaker_status(self, speaker, transcription, current_time, speaker_new_bytes):
+    def update_speaker_status(
+        self, speaker, transcription, current_time, speaker_new_bytes
+    ):
         # If the transcription is different from the last one, reset the word timeout
         if speaker.phrase != transcription:
             speaker.empty_bytes_counter = 0
             speaker.word_timeout = self.quiet_phrase_timeout
-            if re.search(r"\s*\.{2,}$", transcription) or not re.search(r"[.!?]$", transcription):
+            if re.search(r"\s*\.{2,}$", transcription) or not re.search(
+                r"[.!?]$", transcription
+            ):
                 speaker.word_timeout = round(
-                    speaker.word_timeout * self.mid_sentence_multiplier, 3)
+                    speaker.word_timeout * self.mid_sentence_multiplier, 3
+                )
             speaker.phrase = transcription
         elif speaker.empty_bytes_counter > 5:
             speaker.data = speaker.data[:-speaker_new_bytes]
@@ -281,7 +331,7 @@ class WhisperSink(Sink):
 
         data_len = len(data)
         if data_len > self.data_length:
-            data = data[-self.data_length:]
+            data = data[-self.data_length :]
         last_word = time.time()
         # Send bytes to be transcribed
         self.voice_queue.put_nowait([user, data, last_word])
