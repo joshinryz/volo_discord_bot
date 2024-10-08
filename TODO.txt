@@ -1,2 +1,30 @@
 [] Error Handling events such as /connect /scribe etc. Not well done.
-[] 
+[] Move the logs into a rabbitmq and away from logging functions. Store them in the queue. 
+[] Create a worker that processes the queue and store the logs in place that can we read from? Not sure what here
+    [] Maybe a good idea to store in DB?
+
+[] Post session download
+    [] VOLO's take:
+        [] Submit to ChatGPT (free?)
+    [] Full transcription
+
+[] create docker container for portability
+    [] compose setup all containers.
+
+[] D20 Integration
+    [] Extend VOLO to allow the GM to connect to D&D beyond ? 
+        [] Save config for the channel
+            [] Error handling -> resetup etc.
+        [] Get the gamelog , save with rolls and status. 
+        [] Link D&D beyond Character to slack id
+    [] Create words to feed the bot from character sheets (names , spells, inventory, actions)
+
+
+[] Support non-local hardware
+    [] datbase secret management
+    [] Google Voice
+        [] user billing
+    [] OpenAI Voice
+        [] user billing
+
+
