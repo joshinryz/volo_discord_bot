@@ -6,11 +6,9 @@ import re
 import threading
 import time
 import wave
-from scipy.io import wavfile
-from scipy.signal import resample
 import numpy as np
+from datetime import datetime
 from queue import Queue
-import pika
 import torch
 import tempfile
 from tempfile import NamedTemporaryFile
@@ -18,18 +16,16 @@ from typing import List
 
 import speech_recognition as sr
 from discord.sinks.core import Filters, Sink, default_filters
-import whisper
 
-# from faster_whisper import WhisperModel
+
+from faster_whisper import WhisperModel
 
 WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "en"
-
-# audio_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="float32")
-# audio_model = whisper.load_model(WHISPER_MODEL, device="cpu", compute_type="float32")
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
-audio_model = whisper.load_model(WHISPER_MODEL, device=device)
+
+audio_model = WhisperModel(WHISPER_MODEL, device=device, compute_type="float32")
+
 
 # Set the model to evaluation mode (important for inference)
 logger = logging.getLogger(__name__)
@@ -40,12 +36,12 @@ class Speaker:
     A class to store the audio data and transcription for each user.
     """
 
-    def __init__(self, user, data, current_time):
+    def __init__(self, user, data, time=time.time()):
         self.user = user
         self.data = [data]
-        self.first_word = time.time()
-        self.last_word = current_time
-        self.last_phrase = current_time
+        self.first_word =time
+        self.last_word = time
+        self.last_phrase = time
 
         self.word_timeout = 0
 
@@ -140,42 +136,27 @@ class WhisperSink(Sink):
                 f"A sink thread was stopped for guild {self.vc.channel.guild.id}."
             )
 
-    def transcribe_audio(self, buff):
+    def transcribe_audio(self, temp_file):
         try:
-            # Step 1: Save the buffer to a temp file (if needed)
-            with tempfile.NamedTemporaryFile('wb+', delete=False, suffix='.wav') as file:
-                buff.seek(0)
-                file.write(buff.read())
-                file.flush()  # Ensure everything is written to disk
-                temp_file_name = file.name  # Store the file name
-
-            # Step 2: Load the audio using scipy.io.wavfile
-            sample_rate, audio = wavfile.read(temp_file_name)
-
-            # Step 3: Convert stereo to mono (if necessary)
-            if len(audio.shape) > 1 and audio.shape[1] == 2:
-                audio = np.mean(audio, axis=1)
-
-            # Step 4: Resample to 16 kHz if necessary
-            if sample_rate != 16000:
-                num_samples = int(len(audio) * 16000 / sample_rate)
-                audio = resample(audio, num_samples)
-                sample_rate = 16000
-
-            # Step 5: Ensure the audio is in float32 format (if it's not already)
-            if audio.dtype != np.float32:
-                audio = audio.astype(np.float32)
-
-            result = audio_model.transcribe(
-                temp_file_name,
-                language='EN',
+            # The whisper model
+            segments, info = audio_model.transcribe(
+                temp_file,
+                language=WHISPER_LANGUAGE,
+                beam_size=10,
+                best_of=3,
+                vad_filter=True,
+                vad_parameters=dict(
+                    min_silence_duration_ms=150,
+                    threshold=0.8
+                ),
                 no_speech_threshold=0.6,
+                initial_prompt="You are writing the transcriptions for a D&D game.",
             )
 
-            segments = list(result['segments'])
+            segments = list(segments)
             result = ""
             for segment in segments:
-                result += segment['text']
+                result += segment.text
 
             return result
         except Exception as e:
@@ -195,12 +176,12 @@ class WhisperSink(Sink):
         with wave.open(wav_io, "wb") as wave_writer:
             wave_writer.setnchannels(self.vc.decoder.CHANNELS)
             wave_writer.setsampwidth(
-                self.vc.decoder.SAMPLE_SIZE // self.vc.decoder.CHANNELS
-            )
+                self.vc.decoder.SAMPLE_SIZE // self.vc.decoder.CHANNELS)
             wave_writer.setframerate(self.vc.decoder.SAMPLING_RATE)
             wave_writer.writeframes(wav_data.getvalue())
 
         wav_io.seek(0)
+
         transcription = self.transcribe_audio(wav_io)
 
         return transcription
@@ -299,10 +280,13 @@ class WhisperSink(Sink):
                 self.speakers.remove(speaker)
 
     def write_transcription_log(self, speaker, transcription):
-        logger.info(
-            f"Begin: {speaker.first_word} End: {speaker.last_word} User_ID: {speaker.user} :: {speaker.phrase}"
+        output = (
+            f"Begin: {datetime.fromtimestamp(speaker.first_word).strftime('%H:%M:%S'): <10}\n"
+            f"End: {datetime.fromtimestamp(speaker.last_word).strftime('%H:%M:%S'): <10}\n"
+            f"Phrase: {datetime.fromtimestamp(speaker.last_phrase).strftime('%H:%M:%S'): <10}\n"
+            f"User_ID: {speaker.user: <15} :: {speaker.phrase: <30}\n"
         )
-
+        print(output)
     # Im not running an alexa, remove this.
     def update_speaker_status(
         self, speaker, transcription, current_time, speaker_new_bytes
@@ -310,6 +294,7 @@ class WhisperSink(Sink):
         # If the transcription is different from the last one, reset the word timeout
         if speaker.phrase != transcription:
             speaker.empty_bytes_counter = 0
+            speaker.last_phrase = current_time
             speaker.word_timeout = self.quiet_phrase_timeout
             if re.search(r"\s*\.{2,}$", transcription) or not re.search(
                 r"[.!?]$", transcription
@@ -332,9 +317,9 @@ class WhisperSink(Sink):
         data_len = len(data)
         if data_len > self.data_length:
             data = data[-self.data_length :]
-        last_word = time.time()
+        write_time = time.time()
         # Send bytes to be transcribed
-        self.voice_queue.put_nowait([user, data, last_word])
+        self.voice_queue.put_nowait([user, data, write_time])
 
     def close(self):
         logger.debug("Closing whisper sink.")
