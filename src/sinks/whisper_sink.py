@@ -138,9 +138,31 @@ class WhisperSink(Sink):
             logger.debug(
                 f"A sink thread was stopped for guild {self.vc.channel.guild.id}."
             )
+    def check_audio_length(self, temp_file):
+        # Ensure the BytesIO is at the start
+        temp_file.seek(0)
 
+        # Open the BytesIO object as a WAV file
+        with wave.open(temp_file, 'rb') as wave_file:
+            # Get the number of frames
+            frames = wave_file.getnframes()
+            # Get the frame rate (samples per second)
+            frame_rate = wave_file.getframerate()
+            # Calculate the duration in seconds
+            duration = frames / float(frame_rate)
+
+        return duration
     def transcribe_audio(self, temp_file):
         try:
+            if self.check_audio_length(temp_file) <= 0.1:
+                return ""
+            openai_transcription = client.audio.transcriptions.create(
+                file=("foobar.wav", temp_file),
+                model="whisper-1",
+            )
+            
+            temp_file.seek(0)
+               
             # The whisper model
             segments, info = audio_model.transcribe(
                 temp_file,
@@ -161,6 +183,8 @@ class WhisperSink(Sink):
             for segment in segments:
                 result += segment.text
 
+            logger.info(f"Transcription: {result}")
+            logger.info(f"OpenAI Transcription: {openai_transcription.text}")
             return result
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
@@ -184,7 +208,8 @@ class WhisperSink(Sink):
             wave_writer.writeframes(wav_data.getvalue())
 
         wav_io.seek(0)
-
+        # Check if the audio is long enough to transcribe, else return empty string
+        
         transcription = self.transcribe_audio(wav_io)
 
         return transcription
@@ -207,13 +232,19 @@ class WhisperSink(Sink):
                         self.max_speakers < 0 or len(self.speakers) <= self.max_speakers
                     ):
                         self.speakers.append(Speaker(item[0], item[1], item[2]))
+                    
+                    
+
 
                 # Transcribe audio for each speaker
+                # so this is interesting, as we arent checking the size of the audio stream, we are just transcribing it
                 future_to_speaker = {}
                 for speaker in self.speakers:
+                    if (time.time() - speaker.last_word) < 0.5:
+                        # Lets make sure the user stopped talking.
+                        continue
                     if speaker.new_bytes > 1:
                         speaker.new_bytes = 0
-
                         future = self.executor.submit(self.transcribe, speaker)
                         future_to_speaker[future] = speaker
                     else:
