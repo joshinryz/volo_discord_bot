@@ -19,7 +19,7 @@ WAKE_WORDS = ["ok billy", "yo billy", "okay billy", "hey billy"]
 
 
 class VoloBot(discord.Bot):
-    def __init__(self, loop):
+    def __init__(self, loop, transcriber_type):
 
         super().__init__(command_prefix="!", loop=loop,
                          activity=discord.CustomActivity(name='Transcribing Audio to Text'))
@@ -29,6 +29,7 @@ class VoloBot(discord.Bot):
         self.guild_whisper_sinks = {}
         self.guild_whisper_message_tasks = {}
         self._is_ready = False
+        self.transcriber_type = transcriber_type
 
         self.created_queues = {
             "output.tts": None,
@@ -140,12 +141,8 @@ class VoloBot(discord.Bot):
             self.loop,
             data_length=50000,
             shared_ctx=ctx,
-            quiet_phrase_timeout=2.0,
-            mid_sentence_multiplier=1.5,
-            no_data_multiplier=0.55,
-            max_phrase_timeout=120,
-            min_phrase_length=2,
-            max_speakers=10
+            max_speakers=10,
+            transcriber_type=self.transcriber_type
         )
 
         self.guild_to_helper[ctx.guild_id].vc.start_recording(
