@@ -17,7 +17,9 @@ from typing import List
 
 import speech_recognition as sr
 from discord.sinks.core import Filters, Sink, default_filters
+from openai import OpenAI
 
+client = OpenAI()
 
 from faster_whisper import WhisperModel
 
@@ -288,8 +290,8 @@ class WhisperSink(Sink):
         # Prepare the log data as a dictionary
         log_data = {
             "date": first_word_time[:10],                  # Date (from first_word)
-            "first_word_time": first_word_time[11:],       # First word time (HH:MM:SS.ss)
-            "last_word_time": last_word_time[11:],         # Last word time (HH:MM:SS.ss)
+            "begin": first_word_time[11:],       # First word time (HH:MM:SS.ss)
+            "end": last_word_time[11:],         # Last word time (HH:MM:SS.ss)
             "user_id": speaker.user,                       # User ID
             "event_source": "Discord",                     # Event source
             "data": transcription                          # Transcription text

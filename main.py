@@ -50,11 +50,13 @@ def configure_logging():
     transcription_logger = logging.getLogger('transcription')
     transcription_logger.setLevel(logging.INFO)
 
-    # File handler for transcription logs (with appending to existing file)
-    file_handler = logging.FileHandler(log_filename, mode='a')  # Append mode
+    # File handler for transcription logs (append mode)
+    file_handler = logging.FileHandler(log_filename, mode='a')
     file_handler.setLevel(logging.INFO)
+    
+    # Custom formatter WITHOUT the automatic timestamp
     file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S.%f'[:-3]
+        '%(message)s'  # Only log the custom message, no automatic timestamp
     ))
 
     # Add the handler to the transcription logger
