@@ -1,5 +1,5 @@
 
-# Discord Transcription Bot
+# V.O.L.O Discord Transcription Bot
 
 This project is a Discord bot that transcribes voice channel audio into text in real-time. It uses Whisper for audio transcription and is capable of handling multiple users in a voice channel.
 
@@ -64,14 +64,15 @@ To set up and run this Discord bot, follow these steps:
 1. **Start the Bot:**
 
    ```bash
-   python discord_bot.py
+   python main.py
    ```
 
 2. **Bot Commands:**
 
-   - `/transcribe`: Starts the transcription in the current voice channel.
+   - `/connect`: Connect VOLO to your voice channel.
+   - `/scribe`: Starts the transcription in the current voice channel.
    - `/stop`: Stops the transcription.
-   - `/leave`: Disconnects the bot from the voice channel.
+   - `/disconnect`: Disconnects the bot from the voice channel.
 
 ## Contributing
 
