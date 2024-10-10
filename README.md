@@ -9,7 +9,6 @@ This project is a Discord bot that transcribes voice channel audio into text in 
 - This project uses Faster Whisper (see [Faster Whisper Github](https://github.com/SYSTRAN/faster-whisper))
 - Transcribes voice channel audio to text.
 - Supports multiple users.
-- Uses Whisper for accurate transcription.
 - Thread-safe operations for concurrent transcriptions.
 
 ## Setup
