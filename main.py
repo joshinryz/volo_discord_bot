@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from src.config.cliargs import CLIArgs
 from src.utils.commandline import CommandLine
 from src.bot.helper import BotHelper
+from src.utils.pdf_generator import pdf_generator
 
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -25,7 +26,9 @@ def configure_logging():
 
     # Ensure the directory exists
     log_directory = '.logs/transcripts'
-    os.makedirs(log_directory, exist_ok=True)  # Create the directory if it doesn't exist
+    pdf_directory = '.logs/pdfs'
+    os.makedirs(log_directory, exist_ok=True) 
+    os.makedirs(pdf_directory, exist_ok=True)  
 
     # Get the current date for the log file name
     current_date = datetime.now().strftime('%Y-%m-%d')
@@ -107,7 +110,7 @@ if __name__ == "__main__":
             helper.guild_id = guild_id
             helper.set_vc(vc)
             bot.guild_to_helper[guild_id] = helper
-            await ctx.respond(f"Ah, splendid! The lore shall now flow as freely as the finest ale. 🍺 Prepare to immortalize brilliance!", ephemeral=True)
+            await ctx.respond(f"Ah, splendid! The lore shall now flow as freely as the finest ale. 🍺 Prepare to immortalize brilliance!", ephemeral=False)
             await ctx.guild.change_voice_state(channel=author_vc.channel, self_mute=True)
         except Exception as e:
             await ctx.respond(f"{e}", ephemeral=True)
@@ -128,7 +131,7 @@ if __name__ == "__main__":
             await ctx.respond("I'm sorry my liege, I can only write so fast.. 😥 ✒️", ephemeral=True)
             return
         bot.start_recording(ctx)
-        await ctx.respond("Your words are now inscribed in the annals of history! ✍️ Fear not, for V.O.L.O leaves nothing unwritten", ephemeral=True)
+        await ctx.respond("Your words are now inscribed in the annals of history! ✍️ Fear not, for V.O.L.O leaves nothing unwritten", ephemeral=False)
     
     @bot.slash_command(name="stop", description="Close the Tome on this adventure.")
     async def stop(ctx: discord.context.ApplicationContext):
@@ -154,7 +157,7 @@ if __name__ == "__main__":
             await bot.get_transcription(ctx)
             bot.stop_recording(ctx)
             bot.guild_is_recording[guild_id] = False
-            await ctx.respond("The quill rests. 🖋️ A pause, but not the end. Awaiting your next grand tale, of course!", ephemeral=True)
+            await ctx.respond("The quill rests. 🖋️ A pause, but not the end. Awaiting your next grand tale, of course!", ephemeral=False)
             #await bot.get_transcription(ctx)
             bot.cleanup_sink(ctx)
         
@@ -179,9 +182,33 @@ if __name__ == "__main__":
         helper.set_vc(None)
         bot.guild_to_helper.pop(guild_id, None)
 
-        await ctx.respond("The tome is sealed! 📖 Another chapter well-told, another adventure preserved. You have my gratitude!", ephemeral=True)
+        await ctx.respond("The tome is sealed! 📖 Another chapter well-told, another adventure preserved. You have my gratitude!", ephemeral=False)
+
+    @bot.slash_command(name="generate_pdf", description="Generate a PDF of the transcriptions.")
+    async def generate_pdf(ctx: discord.context.ApplicationContext):
+        guild_id = ctx.guild_id
+        helper = bot.guild_to_helper.get(guild_id, None)
+        if not helper:
+            await ctx.respond("Well, that's akward. I dont seem to be in your party.", ephemeral=True)
+            return
+        transcription = await bot.get_transcription(ctx)
+        if not transcription:
+            await ctx.respond("I'm sorry, but it appears I have no transcriptions to write into the tome.", ephemeral=True)
+            return
+        pdf_file_path = await pdf_generator(transcription)
+        # Send the PDF as an attachment
+        if os.path.exists(pdf_file_path):
+            try:
+                with open(pdf_file_path, "rb") as f:
+                    discord_file = discord.File(f, filename=f"session_transcription.pdf")
+                    await ctx.respond("Here is the transcription from this session:", file=discord_file)
+            finally:
+                os.remove(pdf_file_path)
+        else:
+            await ctx.respond("No transcription file could be generated.", ephemeral=True)
 
 
+        
     @bot.slash_command(name="help", description="Show the help message.")
     async def help(ctx: discord.context.ApplicationContext):
         embed_fields = [
@@ -193,6 +220,8 @@ if __name__ == "__main__":
                 name="/scribe", value="Transcribe the voice channel.", inline=True),
             discord.EmbedField(
                 name="/stop", value="Stop the transcription.", inline=True),
+            discord.EmbedField(
+                name="/generate_pdf", value="Generate a PDF of the transcriptions.", inline=True),
             discord.EmbedField(
                 name="/help", value="Show the help message.", inline=True),
         ]

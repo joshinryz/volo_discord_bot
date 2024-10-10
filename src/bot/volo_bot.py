@@ -7,7 +7,6 @@ import discord
 
 from collections import defaultdict
 from src.sinks.whisper_sink import WhisperSink
-from src.utils.pdf_generator import generate_pdf
 
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 TRANSCRIPTION_METHOD = os.getenv("TRANSCRIPTION_METHOD")
@@ -119,31 +118,17 @@ class VoloBot(discord.Bot):
 
     async def get_transcription(self, ctx: discord.context.ApplicationContext):
         # Get the transcription queue
-        guild_id = ctx.guild_id
+        if not (self.guild_whisper_sinks.get(ctx.guild_id)):
+            return
         whisper_sink = self.guild_whisper_sinks[ctx.guild_id]
         transcriptions = []
         if whisper_sink is None:
-            await ctx.respond("No active transcription session found for this guild.", ephemeral=True)
             return
     
-        transcriptions = whisper_sink.transcription_output_queue
-
-        if not transcriptions:
-            await ctx.respond("No transcriptions available for this session.", ephemeral=True)
-            return
-        
-        pdf_file_path = await generate_pdf(transcriptions, guild_id)
-
-        # Send the PDF as an attachment
-        if os.path.exists(pdf_file_path):
-            try:
-                with open(pdf_file_path, "rb") as f:
-                    discord_file = discord.File(f, filename=f"session_{guild_id}_transcription.pdf")
-                    await ctx.respond("Here is the transcription from this session:", file=discord_file)
-            finally:
-                os.remove(pdf_file_path)
-        else:
-            await ctx.respond("No transcription file could be generated.", ephemeral=True)
+        transcriptions_queue = whisper_sink.transcription_output_queue
+        while not transcriptions_queue.empty():
+            transcriptions.append(await transcriptions_queue.get())
+        return transcriptions
 
     async def stop_and_cleanup(self):
         try:

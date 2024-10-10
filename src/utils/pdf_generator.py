@@ -5,17 +5,16 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 
-async def generate_pdf(transcriptions_queue, guild_id, logo_path=None):
+async def pdf_generator(transcriptions, logo_path=None):
     """
     Generates a PDF document with transcriptions and optional logo.
 
-    :param transcriptions: List of transcriptions to include in the PDF.
-    :param guild_id: The guild ID (used for naming purposes).
+    :param transcriptions: List of transcriptions text to include in the PDF.
     :param logo_path: Optional path to a logo image to include in the PDF.
     :return: The path to the generated PDF file (temporary file).
     """
     # Create a temporary file in the .logs directory
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir="./.logs") as tmp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir="./.logs/pdfs") as tmp_file:
         pdf_file_path = tmp_file.name
 
     # Create the PDF document
@@ -33,11 +32,6 @@ async def generate_pdf(transcriptions_queue, guild_id, logo_path=None):
     title = Paragraph("Transcription Report", styles["Title"])
     elements.append(title)
     elements.append(Spacer(1, 12))
-    
-    # Process the transcriptions queue
-    transcriptions = []
-    while not transcriptions_queue.empty():
-        transcriptions.append(await transcriptions_queue.get())
     
     # Add the transcriptions
     for idx, transcription in enumerate(transcriptions):
