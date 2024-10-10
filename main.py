@@ -111,7 +111,6 @@ if __name__ == "__main__":
             await ctx.guild.change_voice_state(channel=author_vc.channel, self_mute=True)
         except Exception as e:
             await ctx.respond(f"{e}", ephemeral=True)
-        #bot.start_recording(ctx)
 
     @bot.slash_command(name="scribe", description="Ink the Saga of this adventure.")
     async def ink(ctx: discord.context.ApplicationContext):
@@ -140,6 +139,7 @@ if __name__ == "__main__":
             return
 
         bot_vc = helper.vc
+        
         if not bot_vc:
             await ctx.respond("Well, that's akward. I dont seem to be in your party.", ephemeral=True)
             return
@@ -149,9 +149,14 @@ if __name__ == "__main__":
             return
 
         await ctx.trigger_typing()
+        
         if bot.guild_is_recording.get(guild_id, False):
+            await bot.get_transcription(ctx)
             bot.stop_recording(ctx)
+            bot.guild_is_recording[guild_id] = False
             await ctx.respond("The quill rests. 🖋️ A pause, but not the end. Awaiting your next grand tale, of course!", ephemeral=True)
+            #await bot.get_transcription(ctx)
+            bot.cleanup_sink(ctx)
         
     @bot.slash_command(name="disconnect", description="VOLO leaves your party. Goodbye, friend.")
     async def disconnect(ctx: discord.context.ApplicationContext):

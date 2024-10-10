@@ -7,7 +7,7 @@ import discord
 
 from collections import defaultdict
 from src.sinks.whisper_sink import WhisperSink
-
+from src.utils.pdf_generator import generate_pdf
 
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 TRANSCRIPTION_METHOD = os.getenv("TRANSCRIPTION_METHOD")
@@ -20,7 +20,6 @@ class VoloBot(discord.Bot):
         super().__init__(command_prefix="!", loop=loop,
                          activity=discord.CustomActivity(name='Transcribing Audio to Text'))
         self.guild_to_helper = {}
-        self.action_queue = asyncio.Queue()
         self.guild_is_recording = {}
         self.guild_whisper_sinks = {}
         self.guild_whisper_message_tasks = {}
@@ -29,53 +28,7 @@ class VoloBot(discord.Bot):
             self.transcriber_type = "openai"
         else:
             self.transcriber_type = "local"
-        # Store transcription queues for each guild/session
-        self.guild_to_transcript_queue = defaultdict(asyncio.Queue)
-        
-        self.created_queues = {
-            "output.tts": None,
-            "volume.set": None,
-            "discord.post": None,
-            "sfx.play": None,
-            "music.control": None,
-            "request.status": {
-                "x-max-length": 10,
-            }
-        }
-
-    async def process_actions(self):
-        while True:
-            try:
-                action = await self.action_queue.get()
-                node_type = action.get("node_type", None)
-                guild_id = action.get("guild_id", None)
-                logger.debug(f"Processing action: {action}")
-
-                helper = self.guild_to_helper.get(guild_id, None)
-                if helper is None:
-                    logger.error(
-                        f"Helper not found for guild {guild_id}. Skipping action.")
-                    continue
-
-                if node_type == "discord.post":
-                    await helper._handle_post_node(action, DISCORD_CHANNEL_ID)
-                elif node_type == "output.tts":
-                    await helper._handle_tts_node(action)
-                elif node_type == "volume.set":
-                    helper._handle_volume_node(action)
-                elif node_type == "sfx.play":
-                    await helper._handle_sfx_node(action)
-                elif node_type == "music.control":
-                    await helper._handle_music_control_node(action)
-                elif action.get("status", None):
-                    await helper._handle_request_status_update(action)
-                else:
-                    logger.error(f"Unknown action: {action}")
-            except Exception as e:
-                logger.error(f"Error processing action: {e}")
-                logger.error(f"Action: {action}")
-
-            await asyncio.sleep(0.15)
+    
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} to Discord.")
@@ -128,7 +81,6 @@ class VoloBot(discord.Bot):
             transcript_queue,
             self.loop,
             data_length=50000,
-            shared_ctx=ctx,
             max_speakers=10,
             transcriber_type=self.transcriber_type
         )
@@ -153,15 +105,45 @@ class VoloBot(discord.Bot):
         if vc:
             self.guild_is_recording[ctx.guild_id] = False
             vc.stop_recording()
-
+        guild_id = ctx.guild_id
         whisper_message_task = self.guild_whisper_message_tasks.get(
-            ctx.guild_id, None)
+            guild_id, None)
         if whisper_message_task:
             logger.debug("Cancelling whisper message task.")
             whisper_message_task.cancel()
-            del self.guild_whisper_message_tasks[ctx.guild_id]
+            del self.guild_whisper_message_tasks[guild_id]
 
-        self._close_and_clean_sink_for_guild(ctx.guild_id)
+    def cleanup_sink(self, ctx: discord.context.ApplicationContext):
+        guild_id = ctx.guild_id
+        self._close_and_clean_sink_for_guild(guild_id)
+
+    async def get_transcription(self, ctx: discord.context.ApplicationContext):
+        # Get the transcription queue
+        guild_id = ctx.guild_id
+        whisper_sink = self.guild_whisper_sinks[ctx.guild_id]
+        transcriptions = []
+        if whisper_sink is None:
+            await ctx.respond("No active transcription session found for this guild.", ephemeral=True)
+            return
+    
+        transcriptions = whisper_sink.transcription_output_queue
+
+        if not transcriptions:
+            await ctx.respond("No transcriptions available for this session.", ephemeral=True)
+            return
+        
+        pdf_file_path = await generate_pdf(transcriptions, guild_id)
+
+        # Send the PDF as an attachment
+        if os.path.exists(pdf_file_path):
+            try:
+                with open(pdf_file_path, "rb") as f:
+                    discord_file = discord.File(f, filename=f"session_{guild_id}_transcription.pdf")
+                    await ctx.respond("Here is the transcription from this session:", file=discord_file)
+            finally:
+                os.remove(pdf_file_path)
+        else:
+            await ctx.respond("No transcription file could be generated.", ephemeral=True)
 
     async def stop_and_cleanup(self):
         try:
@@ -175,3 +157,4 @@ class VoloBot(discord.Bot):
             logger.error(f"Error stopping whisper sinks: {e}")
         finally:
             logger.info("Cleanup completed.")
+    

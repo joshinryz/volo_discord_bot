@@ -10,6 +10,7 @@ from datetime import datetime
 from queue import Queue
 import torch
 from typing import List
+import asyncio
 
 import speech_recognition as sr
 from discord.sinks.core import Filters, Sink, default_filters
@@ -68,18 +69,17 @@ class WhisperSink(Sink):
         transcriber_type="local",
         *,
         filters=None,
-        shared_ctx=None,
         data_length=50000,
         max_speakers=-1,
     ):
         self.queue = transcript_queue
+        self.transcription_output_queue = asyncio.Queue()
         self.loop = loop
 
         if filters is None:
             filters = default_filters
         self.filters = filters
         Filters.__init__(self, **self.filters)
-        self.shared_ctx = shared_ctx
         self.data_length = data_length
         self.max_speakers = max_speakers
         self.transcriber_type = transcriber_type
@@ -146,6 +146,7 @@ class WhisperSink(Sink):
                     language=WHISPER_LANGUAGE,
                 )
                 logger.info(f"OpenAI Transcription: {openai_transcription.text}")
+                self.transcription_output_queue.put_nowait(openai_transcription.text)
                 return openai_transcription.text
             else:               
                 # The whisper model
@@ -170,7 +171,7 @@ class WhisperSink(Sink):
                     result += segment.text
 
                 logger.info(f"Transcription: {result}")
-                
+                self.transcription_output_queue.put_nowait(result)
                 return result
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
@@ -199,7 +200,14 @@ class WhisperSink(Sink):
         transcription = self.transcribe_audio(wav_io)
 
         return transcription
-
+    
+    def get_transcriptions(self):
+        """Retrieve all transcriptions from the queue."""
+        transcriptions = []
+        while not self.transcription_queue.empty():
+            transcriptions.append(self.transcription_queue.get_nowait())
+        return transcriptions
+    
     def insert_voice(self):
         while self.running:
             try:
