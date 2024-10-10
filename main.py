@@ -95,13 +95,16 @@ if __name__ == "__main__":
     @bot.slash_command(name="connect", description="Add VOLO to your voice party.")
     async def connect(ctx: discord.context.ApplicationContext):
         if bot._is_ready is False:
-            await ctx.respond("Ahem, seems even the finest quills falter. 🛑 No connection, no tale. Try again, my dear adventurer.”", ephemeral=True)
+            await ctx.respond("Ahem, seems even the finest quills falter. 🛑 No connection, no tale. Try again, my dear adventurer shortly.”", ephemeral=True)
             return
         author_vc = ctx.author.voice
         if not author_vc:
             await ctx.respond("I'm sorry adventurer, but it appears your voice has not joined a party.", ephemeral=True)
             return
-
+        # check if we are already connected to a voice channel
+        if bot.guild_to_helper.get(ctx.guild_id, None):
+            await ctx.respond("I'm sorry adventurer, but it appears I'm already in a party. 🤺", ephemeral=True)
+            return
         await ctx.trigger_typing()
         try:
             guild_id = ctx.guild_id
@@ -119,6 +122,18 @@ if __name__ == "__main__":
     @bot.slash_command(name="scribe", description="Ink the Saga of this adventure.")
     async def ink(ctx: discord.context.ApplicationContext):
         await ctx.trigger_typing()
+        connect_command = next((cmd for cmd in ctx.bot.application_commands if cmd.name == "connect"), None)
+        if not connect_command:
+            connect_text = "`/connect`"
+        else:
+            connect_text = f"</connect:{connect_command.id}>"
+        if not bot.guild_to_helper.get(ctx.guild_id, None):
+            await ctx.respond(f"Well, that's akward. I dont seem to be in your party. How about I join? {connect_text}", ephemeral=True)
+            return
+        # check if we are already scribing
+        if bot.guild_is_recording.get(ctx.guild_id, False):
+            await ctx.respond("I'm sorry my liege, I can only write so fast.. 😥 ✒️", ephemeral=True)
+            return
         bot.start_recording(ctx)
         await ctx.respond("Your words are now inscribed in the annals of history! ✍️ Fear not, for V.O.L.O leaves nothing unwritten", ephemeral=True)
     
@@ -136,7 +151,7 @@ if __name__ == "__main__":
             return
 
         if not bot.guild_is_recording.get(guild_id, False):
-            await ctx.respond("Well, that’s awkward. 😐 The quill refuses to still itself... Shall I try again, or will you?", ephemeral=True)
+            await ctx.respond("Well, that’s awkward. 😐 Was I suppose to be writing?", ephemeral=True)
             return
 
         await ctx.trigger_typing()
@@ -147,12 +162,18 @@ if __name__ == "__main__":
     @bot.slash_command(name="disconnect", description="VOLO leaves your party. Goodbye, friend.")
     async def disconnect(ctx: discord.context.ApplicationContext):
         guild_id = ctx.guild_id
-        helper = bot.guild_to_helper[guild_id]
-        bot_vc = helper.vc
-        if not bot_vc:
-            await ctx.respond("Well, that's akward. I dont seem to be in your party.", ephemeral=True)
+        id_exists = bot.guild_to_helper.get(guild_id, None)
+        if not id_exists:
+            await ctx.respond("Well, that's akward. I dont seem to be in your party... Should I just go?", ephemeral=True)
             return
-
+        
+        helper = bot.guild_to_helper[guild_id]    
+        bot_vc = helper.vc
+        
+        if not bot_vc:
+            await ctx.respond("Huh, weird.. where am I? Maybe we should party back up.", ephemeral=True)
+            return
+        
         await ctx.trigger_typing()
         await bot_vc.disconnect()
         helper.guild_id = None
@@ -170,7 +191,7 @@ if __name__ == "__main__":
             discord.EmbedField(
                 name="/disconnect", value="Disconnect from your voice channel.", inline=True),
             discord.EmbedField(
-                name="/transcribe", value="Transcribe the voice channel.", inline=True),
+                name="/scribe", value="Transcribe the voice channel.", inline=True),
             discord.EmbedField(
                 name="/stop", value="Stop the transcription.", inline=True),
             discord.EmbedField(
