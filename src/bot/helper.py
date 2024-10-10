@@ -5,9 +5,9 @@ import logging
 import discord
 
 
-BOT_NAME = "HeyBilly 💤"
-BOT_AWAKE_NAME = "HeyBilly 💬"
-BOT_PROCESSING_NAME = "HeyBilly 💡"
+BOT_NAME = "VOLO 💤"
+BOT_AWAKE_NAME = "VOLO 💬"
+BOT_PROCESSING_NAME = "VOLO 💡"
 
 logger = logging.getLogger(__name__)
 

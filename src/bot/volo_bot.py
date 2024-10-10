@@ -5,21 +5,17 @@ import os
 
 import discord
 
+from collections import defaultdict
 from src.sinks.whisper_sink import WhisperSink
-from src.queue.connect import RabbitConnection
-from src.queue.consumer_manager import ConsumerManager
-from src.queue.transcript_publisher import TranscriptPublisher
 
 
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
+TRANSCRIPTION_METHOD = os.getenv("TRANSCRIPTION_METHOD")
 
 logger = logging.getLogger(__name__)
 
-WAKE_WORDS = ["ok billy", "yo billy", "okay billy", "hey billy"]
-
-
 class VoloBot(discord.Bot):
-    def __init__(self, loop, transcriber_type):
+    def __init__(self, loop):
 
         super().__init__(command_prefix="!", loop=loop,
                          activity=discord.CustomActivity(name='Transcribing Audio to Text'))
@@ -29,8 +25,13 @@ class VoloBot(discord.Bot):
         self.guild_whisper_sinks = {}
         self.guild_whisper_message_tasks = {}
         self._is_ready = False
-        self.transcriber_type = transcriber_type
-
+        if TRANSCRIPTION_METHOD == "openai":
+            self.transcriber_type = "openai"
+        else:
+            self.transcriber_type = "local"
+        # Store transcription queues for each guild/session
+        self.guild_to_transcript_queue = defaultdict(asyncio.Queue)
+        
         self.created_queues = {
             "output.tts": None,
             "volume.set": None,
@@ -77,20 +78,9 @@ class VoloBot(discord.Bot):
             await asyncio.sleep(0.15)
 
     async def on_ready(self):
-        logger.info(f"Logged in as {self.user}.")
-        #await self.start_consumers()
-
-        #self.loop.create_task(self.process_actions())
+        logger.info(f"Logged in as {self.user} to Discord.")
         self._is_ready = True
 
-
-    async def start_consumers(self):
-        self.rabbit_conn = await RabbitConnection.connect("localhost", self.loop)
-        self.consumer_manager = ConsumerManager(self.rabbit_conn, self.loop)
-
-        for queue_name, args in self.created_queues.items():
-            logger.debug(f"Creating consumer for queue: {queue_name}")
-            await self.consumer_manager.create_consumer(queue_name, self.action_queue, args)
 
     async def close_consumers(self):
         await self.consumer_manager.close()
@@ -133,8 +123,6 @@ class VoloBot(discord.Bot):
             self._close_and_clean_sink_for_guild(ctx.guild_id)
 
         transcript_queue = asyncio.Queue()
-        #t = self.loop.create_task(transcript_process(self.rabbit_conn, transcript_queue, ctx.guild_id, self))
-        #self.guild_whisper_message_tasks[ctx.guild_id] = t
 
         whisper_sink = WhisperSink(
             transcript_queue,
@@ -187,36 +175,3 @@ class VoloBot(discord.Bot):
             logger.error(f"Error stopping whisper sinks: {e}")
         finally:
             logger.info("Cleanup completed.")
-
-
-async def transcript_process(
-        rabbit_conn,
-        transcript_queue: asyncio.Queue,
-        guild_id: int,
-        bot: VoloBot):
-    transcript_publisher = TranscriptPublisher(rabbit_conn)
-    await transcript_publisher.setup_connection()
-
-    while True:
-        try:
-            response = await transcript_queue.get()
-
-            if response is None:
-                break  # Queue is closed
-            else:
-                user_id = response["user"]
-                text = response["result"]
-
-                guild = bot.get_guild(guild_id)
-                username = guild.get_member(user_id).global_name
-                logger.info(f"User {username} said: {text}")
-                voice = bot.guild_to_helper[guild_id].voice
-
-                await transcript_publisher.publish_data(json.dumps({
-                    "guild_id": guild_id,
-                    "username": username,
-                    "text": text,
-                    "voice": voice
-                }))
-        except Exception as e:
-            logger.error(f"Error processing whisper message: {e}")

@@ -67,17 +67,11 @@ if __name__ == "__main__":
     CLIArgs.update_from_args(args)
 
     configure_logging()
-
     loop = asyncio.get_event_loop()
-
-    from src.bot.volo_bot import VoloBot
-    if CLIArgs.transcriber_type == "openai":
-        transcriber_type = "openai"
-    else:
-        transcriber_type = "local"
     
+    from src.bot.volo_bot import VoloBot  
     
-    bot = VoloBot(loop, transcriber_type)
+    bot = VoloBot(loop)
 
     @bot.event
     async def on_voice_state_update(member, before, after):
