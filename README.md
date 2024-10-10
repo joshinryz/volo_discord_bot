@@ -5,7 +5,8 @@ This project is a Discord bot that transcribes voice channel audio into text in 
 
 ## Features
 
-- This project use Pycord (see [Pycord Github](https://github.com/Pycord-Development/pycord))
+- This project uses Pycord (see [Pycord Github](https://github.com/Pycord-Development/pycord))
+- This project uses Faster Whisper (see [Faster Whisper Github](https://github.com/SYSTRAN/faster-whisper))
 - Transcribes voice channel audio to text.
 - Supports multiple users.
 - Uses Whisper for accurate transcription.
