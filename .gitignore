@@ -4,3 +4,5 @@ __pycache__/
 Sessions/
 player_map.yml
 player_map.yaml
+.venv/
+.logs/
