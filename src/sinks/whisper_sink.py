@@ -3,16 +3,12 @@ from concurrent.futures import ThreadPoolExecutor
 import io
 import logging
 import json
-import re
 import threading
 import time
 import wave
-import numpy as np
 from datetime import datetime
 from queue import Queue
 import torch
-import tempfile
-from tempfile import NamedTemporaryFile
 from typing import List
 
 import speech_recognition as sr
@@ -23,13 +19,21 @@ from faster_whisper import WhisperModel
 
 WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "en"
+WHISPER__PRECISION = "float32"
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-audio_model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type="float32")
-
 
 # Set the model to evaluation mode (important for inference)
 logger = logging.getLogger(__name__)
+
+if DEVICE == "cuda":
+    gpu_ram = torch.cuda.get_device_properties(0).total_memory/1024**3
+    if gpu_ram < 5.0:
+        logger.warning("GPU has less than 5GB of RAM. Switching to CPU.")
+        DEVICE = "cpu"
+
+audio_model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=WHISPER__PRECISION)
+
 
 
 class Speaker:
