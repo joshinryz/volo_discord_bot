@@ -146,7 +146,6 @@ class WhisperSink(Sink):
                     language=WHISPER_LANGUAGE,
                 )
                 logger.info(f"OpenAI Transcription: {openai_transcription.text}")
-                self.transcription_output_queue.put_nowait(openai_transcription.text)
                 return openai_transcription.text
             else:               
                 # The whisper model
@@ -171,7 +170,6 @@ class WhisperSink(Sink):
                     result += segment.text
 
                 logger.info(f"Transcription: {result}")
-                self.transcription_output_queue.put_nowait(result)
                 return result
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
@@ -202,10 +200,31 @@ class WhisperSink(Sink):
         return transcription
     
     def get_transcriptions(self):
-        """Retrieve all transcriptions from the queue."""
+        """Retrieve all transcriptions from the queue, format them to only include data, begin, and user_id."""
         transcriptions = []
         while not self.transcription_queue.empty():
-            transcriptions.append(self.transcription_queue.get_nowait())
+            log_message = self.transcription_queue.get_nowait()
+
+            # Assuming log_message is a dictionary (or string in JSON format)
+            if isinstance(log_message, str):
+                log_message = json.loads(log_message)  # Convert from string to dictionary if needed
+
+            # Extract only the desired fields from the log message
+            begin = log_message.get("begin", "Unknown begin")
+            user_id = log_message.get("user_id", "Unknown user")
+            data = log_message.get("data", "")
+
+            # Format the transcription entry with only the relevant fields
+            formatted_entry = (
+                f"Begin: {begin}\n"
+                f"User ID: {user_id}\n"
+                f"Data: {data}\n"
+                "-------------------------\n"
+            )
+
+            # Add the formatted entry to the transcription list
+            transcriptions.append(formatted_entry)
+
         return transcriptions
     
     def insert_voice(self):
@@ -290,9 +309,10 @@ class WhisperSink(Sink):
 
         # Get the transcription logger
         transcription_logger = logging.getLogger('transcription')
-
         # Log the message
         transcription_logger.info(log_message)
+        # Place into queue for processing
+        self.transcription_output_queue.put_nowait(log_message)
     
 
     @Filters.container
