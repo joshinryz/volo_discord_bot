@@ -14,6 +14,7 @@ black
 pylint
 
 #openai and speech recognition
+openai
 faster_whisper
 speechrecognition
 
