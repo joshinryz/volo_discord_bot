@@ -42,8 +42,10 @@ class Speaker:
     A class to store the audio data and transcription for each user.
     """
 
-    def __init__(self, user, data, time=time.time()):
+    def __init__(self, user: int, player: str, character: str, data, time=time.time()):
         self.user = user
+        self.player = player
+        self.character = character
         self.data = [data]
         self.first_word =time
         self.last_word = time
@@ -69,6 +71,7 @@ class WhisperSink(Sink):
         transcriber_type="local",
         *,
         filters=None,
+        player_map={},
         data_length=50000,
         max_speakers=-1,
     ):
@@ -91,6 +94,7 @@ class WhisperSink(Sink):
         self.speakers: List[Speaker] = []
         self.voice_queue = Queue()
         self.executor = ThreadPoolExecutor(max_workers=8)  # TODO: Adjust this
+        self.player_map = player_map
 
     def start_voice_thread(self, on_exception=None):
         def thread_exception_hook(args):
@@ -244,7 +248,11 @@ class WhisperSink(Sink):
                     elif (
                         self.max_speakers < 0 or len(self.speakers) <= self.max_speakers
                     ):
-                        self.speakers.append(Speaker(item[0], item[1], item[2]))
+                        user_id = item[0]
+                        user_map = self.player_map.get(user_id, {})
+                        player = user_map.get("player")
+                        character = user_map.get("character")
+                        self.speakers.append(Speaker(user_id, player, character, item[1], item[2]))
                     
                     
 
@@ -293,13 +301,14 @@ class WhisperSink(Sink):
         # Convert first_word and last_word Unix timestamps to datetime
         first_word_time = datetime.fromtimestamp(speaker.first_word).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         last_word_time = datetime.fromtimestamp(speaker.last_word).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-
         # Prepare the log data as a dictionary
         log_data = {
             "date": first_word_time[:10],                  # Date (from first_word)
             "begin": first_word_time[11:],       # First word time (HH:MM:SS.ss)
             "end": last_word_time[11:],         # Last word time (HH:MM:SS.ss)
             "user_id": speaker.user,                       # User ID
+            "player": speaker.player,
+            "character": speaker.character,
             "event_source": "Discord",                     # Event source
             "data": transcription                          # Transcription text
         }

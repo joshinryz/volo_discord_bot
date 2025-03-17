@@ -2,6 +2,7 @@
 py-cord[voice]
 
 aio-pika
+pyyaml
 
 # Envinroment file .env
 python-dotenv

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
+import yaml
 import time
 import discord
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ from src.utils.pdf_generator import pdf_generator
 
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+PLAYER_MAP_FILE_PATH = os.getenv("PLAYER_MAP_FILE_PATH")
 
 logger = logging.getLogger()  # root logger
 
@@ -208,7 +210,19 @@ if __name__ == "__main__":
             await ctx.respond("No transcription file could be generated.", ephemeral=True)
 
 
-        
+    @bot.slash_command(name="update_player_map", description="Updates the player_map. If `PLAYER_MAP_FILE_PATH` is defined writes info to that location.")
+    async def update_player_map(ctx: discord.context.ApplicationContext):
+        if bot.guild_is_recording.get(ctx.guild_id, False):
+            await ctx.respond("I'm sorry, I am already scribing for a set of true names ..", ephemeral=True)
+            return
+        try:
+            await bot.update_player_map(ctx)
+            await ctx.respond("📜✨ Behold, the Tome of True Names is Updated ✨📜")
+        except Exception as e:
+            await ctx.respond(f"Unable to update player_map.yml.:\n{e}", ephemeral=True)
+            raise e
+
+
     @bot.slash_command(name="help", description="Show the help message.")
     async def help(ctx: discord.context.ApplicationContext):
         embed_fields = [
