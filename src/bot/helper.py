@@ -1,9 +1,9 @@
 import asyncio
-from base64 import b64decode
 import io
 import logging
-import discord
+from base64 import b64decode
 
+import discord
 
 BOT_NAME = "VOLO 💤"
 BOT_AWAKE_NAME = "VOLO 💬"

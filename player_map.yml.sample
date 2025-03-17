@@ -1,19 +1,18 @@
 ---
 # this isnt real - just examples how to enter players for mapping
-users:
-  - 658568568568568658: # Discord ID
-      player: Tom
-      character: Jerry
-  - 324234234324234234:
-      player:  Matthew
-      character: Dungeon Master
-  - 12213123123123123:
-      player: Mona
-      character: Lisa
-  - 5687568543642345:
-      player: Steward
-      character: Little
-  - 2354567568767876:
-      player: Romeo
-      character: Juliet
+658568568568568658: # Discord ID
+    player: Tom
+    character: Jerry
+324234234324234234:
+    player:  Matthew
+    character: Dungeon Master
+12213123123123123:
+    player: Mona
+    character: Lisa
+5687568543642345:
+    player: Steward
+    character: Little
+2354567568767876:
+    player: Romeo
+    character: Juliet
       

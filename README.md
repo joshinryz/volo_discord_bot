@@ -52,6 +52,7 @@ To set up and run this Discord bot, follow these steps:
    ```
    DISCORD_TOKEN=your_discord_bot_token
    GUILD_ID=your_guild_id
+   PLAYER_MAP_FILE_PATH=path_to_player_map.yml
    ```
 
 ### Configuration

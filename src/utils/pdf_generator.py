@@ -1,11 +1,14 @@
-import os
 import json
+import os
 import tempfile
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted, Frame, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import (Frame, Paragraph, Preformatted,
+                                SimpleDocTemplate, Spacer, Table, TableStyle)
+
 
 def add_parchment_background(c, doc):
     """Draw the parchment background on each page."""
