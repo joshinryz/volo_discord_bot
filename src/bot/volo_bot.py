@@ -1,12 +1,12 @@
 import asyncio
 import json
-import yaml
 import logging
 import os
+from collections import defaultdict
 
 import discord
+import yaml
 
-from collections import defaultdict
 from src.sinks.whisper_sink import WhisperSink
 
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))

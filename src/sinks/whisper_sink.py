@@ -1,22 +1,20 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import io
-import logging
 import json
+import logging
 import threading
 import time
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from queue import Queue
-import torch
 from typing import List
-import asyncio
 
 import speech_recognition as sr
+import torch
 from discord.sinks.core import Filters, Sink, default_filters
-from openai import OpenAI
-
 from faster_whisper import WhisperModel
+from openai import OpenAI
 
 WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "en"
