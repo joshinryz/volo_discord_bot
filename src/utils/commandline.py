@@ -22,7 +22,8 @@ class CommandLine:
     @classmethod
     def update_from_args(cls, args):
         for key, value in vars(args).items():
-            if hasattr(cls, key):
+            # Only override class defaults when the CLI provided a concrete value
+            if hasattr(cls, key) and value is not None:
                 setattr(cls, key, value)
 
     @staticmethod
@@ -36,6 +37,13 @@ class CommandLine:
             type=CommandLine()._str2bool,
             default=False,
             help="Enable verbose logging"
+        )
+
+        parser.add_argument(
+            "--transcriber-type",
+            choices=["local", "openai"],
+            default=None,
+            help="Choose the transcriber backend. CLI overrides environment."
         )
 
         return parser.parse_args()

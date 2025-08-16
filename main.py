@@ -35,8 +35,9 @@ def configure_logging():
     log_filename = os.path.join(log_directory, f"{current_date}-transcription.log")
 
     # Custom logging format (date with milliseconds, message)
-    log_format = '%(asctime)s %(name)s: %(message)s'
-    date_format = '%Y-%m-%d %H:%M:%S.%f'[:-3]  # Trim to milliseconds
+    # Use %(msecs)03d to ensure proper millisecond formatting
+    log_format = '%(asctime)s.%(msecs)03d %(name)s: %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
 
     if CLIArgs.verbose:
         logger.setLevel(logging.DEBUG)
@@ -70,17 +71,16 @@ if __name__ == "__main__":
     CLIArgs.update_from_args(args)
 
     configure_logging()
-    loop = asyncio.get_event_loop()
-    
     from src.bot.volo_bot import VoloBot  
     
-    bot = VoloBot(loop)
+    bot = VoloBot()
 
     @bot.event
     async def on_voice_state_update(member, before, after):
         if member.id == bot.user.id:
+            logger.debug(f"Voice state update for bot: before={getattr(before.channel, 'id', None)} after={getattr(after.channel, 'id', None)}")
             # If the bot left the "before" channel
-            if after.channel is None:
+            if after.channel is None and before and before.channel:
                 guild_id = before.channel.guild.id
                 helper = bot.guild_to_helper.get(guild_id, None)
                 if helper:
@@ -91,29 +91,64 @@ if __name__ == "__main__":
 
     @bot.slash_command(name="connect", description="Add VOLO to your voice party.")
     async def connect(ctx: discord.context.ApplicationContext):
+        # Defer the response. ephemeral=True makes the thinking message only visible to the user.
+        await ctx.defer(ephemeral=True)
+
         if bot._is_ready is False:
-            await ctx.respond("Ahem, seems even the finest quills falter. 🛑 No connection, no tale. Try again, my dear adventurer shortly.”", ephemeral=True)
+            await ctx.followup.send("Ahem, seems even the finest quills falter. 🛑 No connection, no tale. Try again, my dear adventurer shortly.”", ephemeral=True)
             return
         author_vc = ctx.author.voice
         if not author_vc:
-            await ctx.respond("I'm sorry adventurer, but it appears your voice has not joined a party.", ephemeral=True)
+            await ctx.followup.send("I'm sorry adventurer, but it appears your voice has not joined a party.", ephemeral=True)
             return
         # check if we are already connected to a voice channel
         if bot.guild_to_helper.get(ctx.guild_id, None):
-            await ctx.respond("I'm sorry adventurer, but it appears I'm already in a party. 🤺", ephemeral=True)
+            await ctx.followup.send("I'm sorry adventurer, but it appears I'm already in a party. 🤺", ephemeral=True)
             return
-        await ctx.trigger_typing()
+        
+        async def fresh_disconnect():
+            try:
+                # Proactively clear any stale voice state before attempting a fresh connect
+                if ctx.guild.voice_client:
+                    await ctx.guild.voice_client.disconnect(force=True)
+                await ctx.guild.change_voice_state(channel=None)
+            except Exception:
+                pass
+
         try:
             guild_id = ctx.guild_id
-            vc = await author_vc.channel.connect()
+            # Short delay can help ensure the gateway voice state updates are settled
+            await asyncio.sleep(1.0)
+            # Attempt to connect to the voice channel (allow reconnect semantics)
+            vc = await author_vc.channel.connect(timeout=45.0, reconnect=True)
+            
             helper = bot.guild_to_helper.get(guild_id, BotHelper(bot))
             helper.guild_id = guild_id
             helper.set_vc(vc)
             bot.guild_to_helper[guild_id] = helper
-            await ctx.respond(f"Ah, splendid! The lore shall now flow as freely as the finest ale. 🍺 Prepare to immortalize brilliance!", ephemeral=False)
-            await ctx.guild.change_voice_state(channel=author_vc.channel, self_mute=True)
+            
+            # Send a public success message
+            await ctx.followup.send(f"Ah, splendid! The lore shall now flow as freely as the finest ale. 🍺 Prepare to immortalize brilliance!", ephemeral=False)
+            # Avoid issuing an immediate voice state update here; it can interfere with the
+            # connection handshake on some library versions and cause reconnect loops.
+        except discord.errors.ConnectionClosed as e:
+            logger.warning(f"Initial voice connect failed with {e}. Attempting one clean retry.")
+            # One clean retry after forcing a state reset
+            await fresh_disconnect()
+            try:
+                await asyncio.sleep(1.0)
+                vc = await author_vc.channel.connect(timeout=45.0, reconnect=True)
+                helper = bot.guild_to_helper.get(guild_id, BotHelper(bot))
+                helper.guild_id = guild_id
+                helper.set_vc(vc)
+                bot.guild_to_helper[guild_id] = helper
+                await ctx.followup.send("Reconnected successfully. Ready to scribe!", ephemeral=False)
+            except Exception as inner:
+                logger.error(f"Retry voice connection failed: {inner}", exc_info=True)
+                await ctx.followup.send(f"Failed to connect to voice channel: {inner}.", ephemeral=True)
         except Exception as e:
-            await ctx.respond(f"{e}", ephemeral=True)
+            logger.error(f"An unexpected error occurred in 'connect' command: {e}", exc_info=True)
+            await ctx.followup.send(f"An unexpected error occurred: {e}", ephemeral=True)
 
     @bot.slash_command(name="scribe", description="Ink the Saga of this adventure.")
     async def ink(ctx: discord.context.ApplicationContext):
@@ -236,19 +271,9 @@ if __name__ == "__main__":
 
 
     try:
-        loop.run_until_complete(bot.start(DISCORD_BOT_TOKEN))
+        bot.run(DISCORD_BOT_TOKEN)
     except KeyboardInterrupt:
         logger.info("^C received, shutting down...")
-        asyncio.run(bot.stop_and_cleanup())
     finally:
-        # Close all connections
-        loop.run_until_complete(bot.close_consumers())
-
-        tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
-        for task in tasks:
-            task.cancel()
-        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-
-        # Close the loop
-        loop.run_until_complete(bot.close())
-        loop.close()
+        # Best-effort cleanup inside bot's loop via on_close
+        pass

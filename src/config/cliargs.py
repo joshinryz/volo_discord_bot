@@ -3,4 +3,5 @@ from src.utils.commandline import CommandLine
 
 class CLIArgs(CommandLine):
     verbose = False
-    transcriber_type = "local"
+    # None means: resolve from environment or fall back to default
+    transcriber_type = None

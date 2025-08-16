@@ -28,12 +28,28 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 logger = logging.getLogger(__name__)
 
 if DEVICE == "cuda":
-    gpu_ram = torch.cuda.get_device_properties(0).total_memory/1024**3
-    if gpu_ram < 5.0:
-        logger.warning("GPU has less than 5GB of RAM. Switching to CPU.")
+    try:
+        gpu_ram = torch.cuda.get_device_properties(0).total_memory/1024**3
+        if gpu_ram < 5.0:
+            logger.warning("GPU has less than 5GB of RAM. Switching to CPU.")
+            DEVICE = "cpu"
+    except Exception as e:
+        logger.warning(f"Unable to query GPU properties; falling back to CPU. Error: {e}")
         DEVICE = "cpu"
 
-audio_model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=WHISPER__PRECISION)
+# Lazy-load the Whisper model to avoid heavy import-time cost
+_audio_model = None
+_audio_model_lock = threading.Lock()
+
+def get_audio_model():
+    global _audio_model
+    if _audio_model is not None:
+        return _audio_model
+    with _audio_model_lock:
+        if _audio_model is None:
+            logger.info(f"Loading Whisper model '{WHISPER_MODEL}' on device '{DEVICE}' with precision '{WHISPER__PRECISION}'")
+            _audio_model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=WHISPER__PRECISION)
+    return _audio_model
 
 
 
@@ -93,23 +109,22 @@ class WhisperSink(Sink):
         self.executor = ThreadPoolExecutor(max_workers=8)  # TODO: Adjust this
 
     def start_voice_thread(self, on_exception=None):
-        def thread_exception_hook(args):
-            logger.debug(
-                f"""Exception in voice thread: {args} Likely disconnected while listening."""
-            )
-
         logger.debug(
             f"Starting whisper sink thread for guild {self.vc.channel.guild.id}."
         )
-        self.voice_thread = threading.Thread(
-            target=self.insert_voice, args=(), daemon=True
-        )
 
-        if on_exception:
-            threading.excepthook = on_exception
-        else:
-            threading.excepthook = thread_exception_hook
+        def run_in_thread():
+            try:
+                self.insert_voice()
+            except Exception as e:
+                logger.error("Unhandled exception in voice thread", exc_info=True)
+                if on_exception:
+                    try:
+                        on_exception(e)
+                    except Exception:
+                        logger.error("Exception while invoking on_exception callback", exc_info=True)
 
+        self.voice_thread = threading.Thread(target=run_in_thread, args=(), daemon=True)
         self.voice_thread.start()
 
     def stop_voice_thread(self):
@@ -148,9 +163,10 @@ class WhisperSink(Sink):
                 logger.info(f"OpenAI Transcription: {openai_transcription.text}")
                 return openai_transcription.text
             else:               
-                # The whisper model
+                # The whisper model (lazy-loaded)
                 temp_file.seek(0)
-                segments, info = audio_model.transcribe(
+                model = get_audio_model()
+                segments, info = model.transcribe(
                     temp_file,
                     language=WHISPER_LANGUAGE,
                     beam_size=10,
@@ -202,8 +218,8 @@ class WhisperSink(Sink):
     def get_transcriptions(self):
         """Retrieve all transcriptions from the queue, format them to only include data, begin, and user_id."""
         transcriptions = []
-        while not self.transcription_queue.empty():
-            log_message = self.transcription_queue.get_nowait()
+        while not self.transcription_output_queue.empty():
+            log_message = self.transcription_output_queue.get_nowait()
 
             # Assuming log_message is a dictionary (or string in JSON format)
             if isinstance(log_message, str):
@@ -317,15 +333,22 @@ class WhisperSink(Sink):
 
     @Filters.container
     def write(self, data, user):
-        """Gets audio data from discord for each user talking"""
-        # Discord will send empty bytes from when the user stopped talking to when the user starts to talk again.
-        # Its only the first data that grows massive and its only silent audio, so its trimmed.
+        # Ensure we have a Member object, not just a user ID.
+        if hasattr(user, "voice"):
+            member = user
+        elif isinstance(user, int) and self.vc and self.vc.channel:
+            member = self.vc.channel.guild.get_member(user)
+        else:
+            member = None
+
+        # If we have a member and they are server-deafened, skip processing.
+        if member and member.voice and member.voice.deaf:
+            return
 
         data_len = len(data)
         if data_len > self.data_length:
-            data = data[-self.data_length :]
+            data = data[-self.data_length:]
         write_time = time.time()
-        # Send bytes to be transcribed
         self.voice_queue.put_nowait([user, data, write_time])
 
     def close(self):

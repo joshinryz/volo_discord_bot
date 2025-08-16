@@ -8,22 +8,30 @@ import discord
 from collections import defaultdict
 from src.sinks.whisper_sink import WhisperSink
 
-DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
-TRANSCRIPTION_METHOD = os.getenv("TRANSCRIPTION_METHOD")
-
 logger = logging.getLogger(__name__)
 
-class VoloBot(discord.Bot):
-    def __init__(self, loop):
+DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
+TRANSCRIPTION_METHOD = os.getenv("TRANSCRIPTION_METHOD")
 
-        super().__init__(command_prefix="!", loop=loop,
-                         activity=discord.CustomActivity(name='Transcribing Audio to Text'))
+class VoloBot(discord.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.voice_states = True  # Required for voice state updates
+        intents.guilds = True        # Required for guild information
+
+        super().__init__(command_prefix="!",
+                         activity=discord.CustomActivity(name='Transcribing Audio to Text'),
+                         intents=intents)
         self.guild_to_helper = {}
         self.guild_is_recording = {}
         self.guild_whisper_sinks = {}
         self.guild_whisper_message_tasks = {}
         self._is_ready = False
-        if TRANSCRIPTION_METHOD == "openai":
+        # Resolve transcriber type with precedence: CLI > ENV > default
+        from src.config.cliargs import CLIArgs
+        if CLIArgs.transcriber_type is not None:
+            self.transcriber_type = CLIArgs.transcriber_type
+        elif TRANSCRIPTION_METHOD == "openai":
             self.transcriber_type = "openai"
         else:
             self.transcriber_type = "local"
@@ -35,7 +43,10 @@ class VoloBot(discord.Bot):
 
 
     async def close_consumers(self):
-        await self.consumer_manager.close()
+        # Gracefully handle absence of a consumer manager
+        consumer_manager = getattr(self, "consumer_manager", None)
+        if consumer_manager and hasattr(consumer_manager, "close"):
+            await consumer_manager.close()
 
     def _close_and_clean_sink_for_guild(self, guild_id: int):
         whisper_sink: WhisperSink | None = self.guild_whisper_sinks.get(
@@ -142,4 +153,3 @@ class VoloBot(discord.Bot):
             logger.error(f"Error stopping whisper sinks: {e}")
         finally:
             logger.info("Cleanup completed.")
-    
